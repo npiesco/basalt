@@ -1,0 +1,33 @@
+:root {
+  color-scheme: dark light;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 2rem;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+.note-title-card {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 0.75rem;
+  max-width: 20rem;
+}
+
+.note-title-card__label {
+  display: block;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+  color: rgba(148, 163, 184, 0.7);
+}
+
+.note-title-card__title {
+  font-size: 1.1rem;
+}

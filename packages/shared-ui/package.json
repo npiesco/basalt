@@ -1,0 +1,14 @@
+{
+  "name": "@basalt/shared-ui",
+  "private": false,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./src/index.js"
+    }
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "basalt-monorepo",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:pwa": "npm run dev --workspace=@basalt/pwa",
+    "dev:desktop": "npm run tauri dev --workspace=@basalt/desktop",
+    "build": "npm run build --workspace=@basalt/pwa && npm run build --workspace=@basalt/desktop",
+    "lint": "npm run lint --workspace=@basalt/pwa",
+    "test": "node --test"
+  }
+}
