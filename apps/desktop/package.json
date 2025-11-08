@@ -12,7 +12,7 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "@npiesco/absurder-sql": "^0.1.0",
+    "@npiesco/absurder-sql": "^0.1.14",
     "@tailwindcss/vite": "^4.1.14",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
