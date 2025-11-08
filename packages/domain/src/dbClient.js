@@ -199,8 +199,15 @@ export async function exportToFile(db) {
  * @returns {Promise<void>}
  */
 export async function importFromFile(db, payload) {
+  console.log('[dbClient] importFromFile called with payload size:', payload?.length);
+
   if (!db || typeof db.importFromFile !== 'function') {
     throw new Error('Database instance provided to importFromFile is invalid');
   }
-  return db.importFromFile(payload);
+
+  console.log('[dbClient] Calling db.importFromFile...');
+  const result = await db.importFromFile(payload);
+  console.log('[dbClient] db.importFromFile completed, result:', result);
+
+  return result;
 }
