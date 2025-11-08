@@ -1,6 +1,6 @@
 # Unified, Step-by-Step Implementation Plan for the AbsurderSQL-Powered Obsidian Rebuild
 
-Last updated: 2025-10-29  
+Last updated: 2025-11-08
 Scope: Build an Obsidian-style experience delivered as both a PWA and a Tauri 2.0 desktop app by **consuming** `@npiesco/absurder-sql`. Reference repos:
 - `/Downloads/absurder-sql/pwa` – Next.js scaffold showing direct WASM usage.
 - `npm install @npiesco/absurder-sql` – published package with WASM bindings.
@@ -24,6 +24,7 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 
 ### Implement AbsurderSQL WASM & Native Integration
 - [x] Reuse the initialization flow from `absurder-sql/pwa/lib/db/client.ts` to expose typed wrappers (`initDb`, `executeQuery`, `exportToFile`, `importFromFile`) tailored to Obsidian workflows. (See `packages/domain/src/dbClient.js`.)
+- [x] **MAJOR MILESTONE (2025-11-08)**: Implemented REAL integration with @npiesco/absurder-sql v0.1.14 (NO MOCKS). Successfully validated: WASM init, database creation, migrations (11 tables), INSERT/SELECT/UPDATE/DELETE operations. Created real integration tests in `tests/integration.simple.test.js` that use actual WASM-based SQLite. Fixed dbClient.js to handle real API: parameter conversion to ColumnValue format, smart SQL statement splitting with BEGIN/END block support, row format conversion. (See commit dc116af)
 - [ ] For the Tauri backend, follow the explorer command pattern: open databases via `SqliteIndexedDB::new`, bridge queries to the React frontend with JSON-serializable results, and expose file export/import commands.
 
 ### Build Core Note Editor & List UI
