@@ -63,13 +63,14 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 ## Phase 3: Full-Text Search & Graph Features (Weeks 13-16)
 
 ### FTS5 Full-Text Search
-- [ ] Keep FTS5 virtual tables in sync via triggers that run inside AbsurderSQL migrations.
+- [x] **FTS5 Validated with REAL Integration Tests (2025-11-09)**: Created comprehensive test suite (`tests/integration.fts5.test.js`) that validates FTS5 virtual tables stay in sync via triggers. Tests PASS with actual absurder-sql WASM - validates search queries, INSERT/UPDATE/DELETE trigger sync, multiple search terms, and AND operators. Confirms FTS5 works correctly with absurder-sql migrations. (See commit 8ae8b6b)
 - [ ] Build live search panel with snippet highlighting, ranking, and filters.
 
 ### Backlinks & Graph View
 - [x] Parse markdown `[[wikilinks]]` on save; populate backlinks table via SQL transactions. (See parser utilities in `packages/domain/src/markdown.js` inspired by `/Downloads/absurder-sql/pwa` link handling.)
 - [x] Show backlinks list for the active note, with quick navigation to referring contexts. (Create normalized models via `packages/domain/src/models.js` and ensure schema includes `backlinks` table.)
 - [x] Visualize the vault graph (D3.js/Cytoscape.js) fed by backlinks data; offer tag/folder filters and performance safeguards for large vaults. (Domain graph aggregator in `packages/domain/src/graph.js` produces node/edge payloads compatible with Cytoscape configuration from `/Downloads/absurder-sql-explorer`.)
+- [x] **Backlinks & Graph Validated with REAL Integration Tests (2025-11-09)**: Created comprehensive test suite (`tests/integration.backlinks.test.js`) that validates wikilink extraction, backlink derivation, database insertion, backlink queries (uni/bidirectional), graph data building, and edge cases (display text, spaces, images, deduplication). All tests PASS with real absurder-sql WASM (v0.1.14). Test duration: 118ms. (See commit 1d7cb34)
 
 ---
 
