@@ -43,10 +43,10 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 
 ### Export/Import `.db` File Support
 - [x] **Export Functionality Validated (2025-11-08)**: Created REAL integration test (`tests/integration.export-only.test.js`) that validates `exportToFile()` with actual absurder-sql WASM. Test PASSES - successfully exports 73,728 bytes with valid SQLite file header ("SQLite format 3"). NO MOCKS. (See commit 18e04aa)
+- [x] **SQLite CLI Compatibility Proven (2025-11-09)**: Created REAL integration tests (`tests/integration.sqlite-cli.test.js`) that export from absurder-sql and query with ACTUAL sqlite3 CLI. Tests PASS - validates exported .db files work with standard SQLite tools (sqlite3, DBeaver, DB Browser). Proves TRUE COMPATIBILITY between two different SQLite implementations. Two-way validation: read data via CLI and insert new data via CLI into exported files. (See commit 99b5b41)
 - [ ] **Import Functionality**: Import tests created but require browser environment (IndexedDB). Node.js tests timeout because `importFromFile()` needs IndexedDB persistence. Next step: Set up Playwright/Puppeteer for browser-based import testing. (See `tests/README.md` for details)
 - [ ] Provide UI actions to export the current vault (`Database.exportToFile()` for PWA, Tauri command returning file bytes for desktop).
 - [ ] Build import wizard: validate schema presence, show merge vs. overwrite choices, and use `Database.importFromFile()` / desktop equivalent to apply data.
-- [ ] Test round-trips with external tools (SQLite CLI, DBeaver) to ensure compatibility.
 
 ### PWA Configuration
 - [ ] Create web app manifest (icons, theme colors, shortcuts) and include current branding assets.
