@@ -24,6 +24,10 @@ export default function HomePage(): JSX.Element {
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
 
+  // Delete confirmation state
+  const [deleteConfirmNoteId, setDeleteConfirmNoteId] = useState<string | null>(null);
+  const [deleteConfirmTitle, setDeleteConfirmTitle] = useState('');
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -202,6 +206,62 @@ export default function HomePage(): JSX.Element {
     setError(null);
   }
 
+  function handleDeleteClick(note: Note, event: React.MouseEvent) {
+    // Stop event propagation so clicking delete doesn't trigger edit
+    event.stopPropagation();
+    console.log('[PWA] Delete requested for note:', note.note_id);
+    setDeleteConfirmNoteId(note.note_id);
+    setDeleteConfirmTitle(note.title);
+  }
+
+  async function handleConfirmDelete() {
+    if (!db || !deleteConfirmNoteId) {
+      setError('Cannot delete - no note selected');
+      return;
+    }
+
+    try {
+      console.log('[PWA] Deleting note:', deleteConfirmNoteId);
+
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      await executeQuery(
+        db,
+        'DELETE FROM notes WHERE note_id = ?',
+        [deleteConfirmNoteId]
+      );
+
+      console.log('[PWA] Note deleted successfully');
+
+      // Close confirmation dialog
+      setDeleteConfirmNoteId(null);
+      setDeleteConfirmTitle('');
+
+      // If we were editing this note, close edit mode
+      if (editingNoteId === deleteConfirmNoteId) {
+        setEditingNoteId(null);
+        setEditTitle('');
+        setEditBody('');
+      }
+
+      setError(null);
+
+      // Reload notes
+      await loadNotes(db);
+    } catch (err) {
+      console.error('[PWA] Failed to delete note:', err);
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleteConfirmNoteId(null);
+      setDeleteConfirmTitle('');
+    }
+  }
+
+  function handleCancelDelete() {
+    console.log('[PWA] Delete canceled');
+    setDeleteConfirmNoteId(null);
+    setDeleteConfirmTitle('');
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -308,20 +368,63 @@ export default function HomePage(): JSX.Element {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-4">
+              <div className="flex gap-4 justify-between">
+                <div className="flex gap-4">
+                  <button
+                    data-testid="save-note-button"
+                    onClick={handleSaveEdit}
+                    className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
+                  >
+                    Save Changes
+                  </button>
+                  <button
+                    data-testid="cancel-edit-button"
+                    onClick={handleCancelEdit}
+                    className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
+                  >
+                    Cancel
+                  </button>
+                </div>
                 <button
-                  data-testid="save-note-button"
-                  onClick={handleSaveEdit}
-                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
+                  data-testid="delete-note-button-edit"
+                  onClick={(e) => {
+                    const note = notes.find(n => n.note_id === editingNoteId);
+                    if (note) handleDeleteClick(note, e);
+                  }}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium"
                 >
-                  Save Changes
+                  Delete Note
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Confirmation Dialog */}
+        {deleteConfirmNoteId && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div
+              data-testid="delete-confirm-dialog"
+              className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+            >
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Confirm Delete</h2>
+              <p className="text-gray-700 mb-6">
+                Are you sure you want to delete "{deleteConfirmTitle}"? This action cannot be undone.
+              </p>
+              <div className="flex gap-4 justify-end">
                 <button
-                  data-testid="cancel-edit-button"
-                  onClick={handleCancelEdit}
+                  data-testid="cancel-delete-button"
+                  onClick={handleCancelDelete}
                   className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
                 >
                   Cancel
+                </button>
+                <button
+                  data-testid="confirm-delete-button"
+                  onClick={handleConfirmDelete}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium"
+                >
+                  Delete
                 </button>
               </div>
             </div>
@@ -344,17 +447,28 @@ export default function HomePage(): JSX.Element {
                   key={note.note_id}
                   data-testid="note-item"
                   onClick={() => handleEditNote(note)}
-                  className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer"
+                  className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer relative"
                 >
-                  <h3 className="font-medium text-gray-900">{note.title}</h3>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Updated: {new Date(note.updated_at).toLocaleString()}
-                  </p>
-                  {note.body && note.body.trim() && (
-                    <p className="text-sm text-gray-600 mt-2 line-clamp-2">
-                      {note.body}
-                    </p>
-                  )}
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h3 className="font-medium text-gray-900">{note.title}</h3>
+                      <p className="text-sm text-gray-500 mt-1">
+                        Updated: {new Date(note.updated_at).toLocaleString()}
+                      </p>
+                      {note.body && note.body.trim() && (
+                        <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                          {note.body}
+                        </p>
+                      )}
+                    </div>
+                    <button
+                      data-testid="delete-note-button"
+                      onClick={(e) => handleDeleteClick(note, e)}
+                      className="ml-4 px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
