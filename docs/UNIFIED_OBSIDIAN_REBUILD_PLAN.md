@@ -35,8 +35,9 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 
 ### Build Core Note Editor & List UI
 - [x] **Note Creation UI with E2E Tests (2025-11-09)**: Implemented first user-facing feature following strict TDD. Created E2E tests (`tests/e2e/create-note.e2e.test.js`) for note creation, watched them FAIL (RED), then built React UI in Next.js PWA to make tests PASS (GREEN). Features: database initialization with WASM, note creation form, real-time note list, proper error handling, ColumnValue parameter conversion. Tests validate complete stack: Database → Domain → UI → Browser. All tests PASS: single note creation (907ms), multiple notes (1.0s), database import (1.4s). NO MOCKS - real absurder-sql WASM, real IndexedDB, real React UI. (See commit 5fc5886)
+- [x] **Note Editing UI with E2E Tests (2025-11-09)**: Implemented UPDATE operation following strict TDD. Created comprehensive E2E tests (`tests/e2e/edit-note.e2e.test.js`) for note editing: edit title, edit body, cancel without saving, multiple sequential edits. All 4 tests PASS. Features: click-to-edit interface, edit form with title input and body textarea (monospace), save/cancel buttons, UPDATE query to database with timestamp updates, edit state management. Tests validate: title persistence (1.0s), body persistence (1.5s), cancel functionality (1.0s), multiple edits (2.2s). No regressions - all previous tests still PASS. CRUD progress: CREATE ✓ UPDATE ✓ (READ working, DELETE pending). (See commit 6484440)
 - [ ] Compose UI shell inspired by Obsidian: left sidebar (folder tree + note list), center markdown editor, optional right sidebar for metadata.
-- [ ] Implement remaining CRUD flows (edit/delete notes and folders) using AbsurderSQL transactions. Persist editor content with debounced saves.
+- [ ] Implement remaining CRUD flows (delete notes and folders) using AbsurderSQL transactions.
 - [ ] Support drag-and-drop folder organization leveraging Zustand state and SQL updates.
 
 ### Multi-Tab Sync (PWA)
