@@ -34,8 +34,9 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 - [ ] For the Tauri backend, follow the explorer command pattern: open databases via `SqliteIndexedDB::new`, bridge queries to the React frontend with JSON-serializable results, and expose file export/import commands.
 
 ### Build Core Note Editor & List UI
+- [x] **Note Creation UI with E2E Tests (2025-11-09)**: Implemented first user-facing feature following strict TDD. Created E2E tests (`tests/e2e/create-note.e2e.test.js`) for note creation, watched them FAIL (RED), then built React UI in Next.js PWA to make tests PASS (GREEN). Features: database initialization with WASM, note creation form, real-time note list, proper error handling, ColumnValue parameter conversion. Tests validate complete stack: Database → Domain → UI → Browser. All tests PASS: single note creation (907ms), multiple notes (1.0s), database import (1.4s). NO MOCKS - real absurder-sql WASM, real IndexedDB, real React UI. (See commit 5fc5886)
 - [ ] Compose UI shell inspired by Obsidian: left sidebar (folder tree + note list), center markdown editor, optional right sidebar for metadata.
-- [ ] Implement CRUD flows (create/edit/delete notes and folders) using AbsurderSQL transactions. Persist editor content with debounced saves.
+- [ ] Implement remaining CRUD flows (edit/delete notes and folders) using AbsurderSQL transactions. Persist editor content with debounced saves.
 - [ ] Support drag-and-drop folder organization leveraging Zustand state and SQL updates.
 
 ### Multi-Tab Sync (PWA)
