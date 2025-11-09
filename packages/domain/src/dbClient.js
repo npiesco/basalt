@@ -211,3 +211,16 @@ export async function importFromFile(db, payload) {
 
   return result;
 }
+
+/**
+ * Close database connection and clean up resources.
+ *
+ * @param {Database} db - Database instance
+ * @returns {Promise<void>}
+ */
+export async function closeDb(db) {
+  if (!db || typeof db.close !== 'function') {
+    throw new Error('Database instance provided to closeDb is invalid');
+  }
+  await db.close();
+}
