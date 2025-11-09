@@ -19,7 +19,7 @@ test.describe('INTEGRATION: Database Import with IndexedDB', () => {
 
     // Navigate to test harness page
     console.log('[E2E] Navigating to test harness...');
-    await page.goto('http://127.0.0.1:3456/tests/e2e/test-harness.html', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost:3000/test-harness', { waitUntil: 'domcontentloaded' });
 
     console.log('[E2E] Page loaded, waiting for WASM initialization...');
 

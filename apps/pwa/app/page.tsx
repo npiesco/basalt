@@ -1,29 +1,238 @@
-import React from 'react';
-import Link from 'next/link';
+'use client';
 
-// Note: @basalt/shared-ui needs to be properly linked in your workspace
-// import { NoteTitleCard } from '@basalt/shared-ui';
+import React, { useState, useEffect } from 'react';
+import { initBasaltDb } from '../lib/db/client';
+
+interface Note {
+  note_id: string;
+  title: string;
+  body: string | null;
+  folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
 
 export default function HomePage(): JSX.Element {
+  const [db, setDb] = useState<any>(null);
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [isReady, setIsReady] = useState(false);
+  const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  // Initialize database on mount
+  useEffect(() => {
+    async function initializeDatabase() {
+      try {
+        console.log('[PWA] Initializing database...');
+
+        const database = await initBasaltDb('basalt-vault-main');
+
+        console.log('[PWA] Database initialized successfully');
+        setDb(database);
+
+        // Expose database to window for E2E testing
+        if (typeof window !== 'undefined') {
+          const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+          (window as any).basaltDb = {
+            executeQuery: async (sql: string, params: any[]) => {
+              return executeQuery(database, sql, params);
+            }
+          };
+        }
+
+        // Ensure root folder exists
+        const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+        // Try to get or create root folder
+        const rootFolderResult = await executeQuery(
+          database,
+          'SELECT folder_id FROM folders WHERE folder_id = ?',
+          ['root']
+        );
+
+        if (rootFolderResult.rows.length === 0) {
+          const now = new Date().toISOString();
+          await executeQuery(
+            database,
+            'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            ['root', '/', null, now, now]
+          );
+          console.log('[PWA] Created root folder');
+        }
+
+        // Load existing notes
+        await loadNotes(database);
+
+        setIsReady(true);
+        console.log('[PWA] App ready');
+      } catch (err) {
+        console.error('[PWA] Failed to initialize database:', err);
+        setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+
+    initializeDatabase();
+  }, []);
+
+  async function loadNotes(database: any) {
+    try {
+      // Import executeQuery helper that handles ColumnValue conversion
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const result = await executeQuery(
+        database,
+        'SELECT note_id, title, body, folder_id, created_at, updated_at FROM notes ORDER BY updated_at DESC',
+        []
+      );
+
+      const noteList: Note[] = result.rows.map((row: any) => {
+        const note: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          note[col] = value.type === 'Null' ? null : value.value;
+        });
+        return note as Note;
+      });
+
+      setNotes(noteList);
+      console.log('[PWA] Loaded notes:', noteList.length);
+    } catch (err) {
+      console.error('[PWA] Failed to load notes:', err);
+    }
+  }
+
+  async function handleCreateNote() {
+    if (!db) {
+      setError('Database not initialized');
+      return;
+    }
+
+    if (!newNoteTitle.trim()) {
+      setError('Note title cannot be empty');
+      return;
+    }
+
+    try {
+      console.log('[PWA] Creating note:', newNoteTitle);
+
+      // Import executeQuery helper that handles ColumnValue conversion
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const noteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date().toISOString();
+
+      await executeQuery(
+        db,
+        'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [noteId, newNoteTitle, '', 'root', now, now]
+      );
+
+      console.log('[PWA] Note created successfully:', noteId);
+
+      // Clear input
+      setNewNoteTitle('');
+      setError(null);
+
+      // Reload notes
+      await loadNotes(db);
+    } catch (err) {
+      console.error('[PWA] Failed to create note:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  if (error && !isReady) {
+    return (
+      <div className="min-h-screen bg-red-50 p-8">
+        <div className="max-w-4xl mx-auto">
+          <h1 className="text-3xl font-bold text-red-700 mb-4">Error</h1>
+          <div className="bg-white p-6 rounded-lg shadow border border-red-200">
+            <p className="text-red-600">{error}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isReady) {
+    return (
+      <div className="min-h-screen bg-gray-100 p-8 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Initializing database...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-gray-100 p-8">
-      <div className="max-w-4xl mx-auto">
-        <h1 className="text-3xl font-bold mb-4">Basalt PWA</h1>
-        <div className="bg-white p-6 rounded-lg shadow">
-          <p className="text-gray-700 mb-4">
-            This UI mirrors the AbsurderSQL PWA explorer reference. Open{' '}
-            <Link 
-              href="https://github.com/npiesco/absurder-sql" 
-              className="text-blue-600 hover:text-blue-800 underline"
-              target="_blank"
-              rel="noopener noreferrer"
+    <div className="min-h-screen bg-gray-100" data-testid="app-ready">
+      <div className="max-w-6xl mx-auto p-8">
+        {/* Header */}
+        <header className="mb-8">
+          <h1 className="text-4xl font-bold text-gray-900 mb-2">Basalt</h1>
+          <p className="text-gray-600">Your local-first knowledge base</p>
+        </header>
+
+        {/* Error Display */}
+        {error && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4">
+            <p className="text-red-700">{error}</p>
+          </div>
+        )}
+
+        {/* Create Note Section */}
+        <div className="bg-white rounded-lg shadow p-6 mb-8">
+          <h2 className="text-xl font-semibold mb-4">Create New Note</h2>
+          <div className="flex gap-4">
+            <input
+              type="text"
+              data-testid="note-title-input"
+              value={newNoteTitle}
+              onChange={(e) => setNewNoteTitle(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleCreateNote();
+                }
+              }}
+              placeholder="Enter note title..."
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              data-testid="new-note-button"
+              onClick={handleCreateNote}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
             >
-              example explorer docs
-            </Link>{' '}
-            while developing complex flows.
-          </p>
-          {/* Uncomment when shared-ui is properly set up */}
-          {/* <NoteTitleCard title="Welcome" /> */}
+              Create Note
+            </button>
+          </div>
+        </div>
+
+        {/* Notes List */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">
+            Notes ({notes.length})
+          </h2>
+          {notes.length === 0 ? (
+            <p className="text-gray-500 text-center py-8">
+              No notes yet. Create your first note above!
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {notes.map((note) => (
+                <div
+                  key={note.note_id}
+                  data-testid="note-item"
+                  className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                >
+                  <h3 className="font-medium text-gray-900">{note.title}</h3>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Updated: {new Date(note.updated_at).toLocaleString()}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

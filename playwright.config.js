@@ -44,11 +44,11 @@ export default {
     },
   ],
 
-  // Start local server for test harness
+  // Start Next.js dev server for E2E tests
   webServer: {
-    command: 'npx http-server -p 3456 -c-1 --cors -a 127.0.0.1',
-    url: 'http://127.0.0.1:3456',
-    timeout: 30000,
+    command: 'cd apps/pwa && npm run dev',
+    url: 'http://localhost:3000',
+    timeout: 120000,
     reuseExistingServer: !process.env.CI,
   },
 
