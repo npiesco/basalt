@@ -19,8 +19,9 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 - [ ] Stand up shared React + TypeScript tooling: CodeMirror 6 for markdown, Zustand for state, React Query (or TanStack Query) for async cache.
 
 ### Design & Implement Database Schema
-- [x] Draft SQL migrations describing the Obsidian vault (notes, folders, tags, backlinks, attachment metadata, FTS5 tables). Store migrations with the new apps; execute them through AbsurderSQL’s `execute` API. (See `packages/domain/src/migrations.js`.)
+- [x] Draft SQL migrations describing the Obsidian vault (notes, folders, tags, backlinks, attachment metadata, FTS5 tables). Store migrations with the new apps; execute them through AbsurderSQL's `execute` API. (See `packages/domain/src/migrations.js`.)
 - [x] Define TypeScript-ready models (for the PWA) and optional Rust structs/serde definitions (for desktop services) that map to the schema. Keep these in the consumer repos. (See `packages/domain/src/models.js` for JSDoc-backed factories.)
+- [x] **Tags and Note-Tags Validated with REAL Integration Tests (2025-11-09)**: Created comprehensive test suite (`tests/integration.tags.test.js`) that validates tag extraction (#hashtag parsing), tag record creation, many-to-many note_tags junction table, and bidirectional queries (tags for note, notes for tag). Tests handle edge cases: tags with numbers/hyphens/underscores, case-insensitivity, deduplication. All tests PASS with real absurder-sql WASM (v0.1.14). Test duration: 118ms. (See commit 213e5b4)
 
 ### Implement AbsurderSQL WASM & Native Integration
 - [x] Reuse the initialization flow from `absurder-sql/pwa/lib/db/client.ts` to expose typed wrappers (`initDb`, `executeQuery`, `exportToFile`, `importFromFile`) tailored to Obsidian workflows. (See `packages/domain/src/dbClient.js`.)
