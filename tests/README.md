@@ -19,6 +19,13 @@ This directory contains REAL integration tests that use actual absurder-sql WASM
 - **Environment**: Node.js
 - **Result**: Successfully exports 73,728 bytes with valid "SQLite format 3" header
 
+#### ✅ `integration.fts5.test.js`
+- Tests FTS5 Full-Text Search with real absurder-sql
+- Validates: Basic search, UPDATE triggers, DELETE triggers, AND operators
+- **Status**: ALL 4 TESTS PASSING ✅
+- **Environment**: Node.js
+- **Result**: FTS5 triggers work correctly, keeping index synchronized
+
 ### Known Limitations
 
 #### ⚠️ Import Tests Require Browser Environment
