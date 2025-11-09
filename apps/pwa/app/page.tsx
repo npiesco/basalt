@@ -19,6 +19,11 @@ export default function HomePage(): JSX.Element {
   const [newNoteTitle, setNewNoteTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  // Edit state
+  const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -141,6 +146,62 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  function handleEditNote(note: Note) {
+    console.log('[PWA] Editing note:', note.note_id);
+    setEditingNoteId(note.note_id);
+    setEditTitle(note.title);
+    setEditBody(note.body || '');
+    setError(null);
+  }
+
+  async function handleSaveEdit() {
+    if (!db || !editingNoteId) {
+      setError('Cannot save - no note being edited');
+      return;
+    }
+
+    if (!editTitle.trim()) {
+      setError('Note title cannot be empty');
+      return;
+    }
+
+    try {
+      console.log('[PWA] Saving note:', editingNoteId);
+
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const now = new Date().toISOString();
+
+      await executeQuery(
+        db,
+        'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?',
+        [editTitle, editBody, now, editingNoteId]
+      );
+
+      console.log('[PWA] Note updated successfully');
+
+      // Close edit mode
+      setEditingNoteId(null);
+      setEditTitle('');
+      setEditBody('');
+      setError(null);
+
+      // Reload notes
+      await loadNotes(db);
+    } catch (err) {
+      console.error('[PWA] Failed to update note:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleCancelEdit() {
+    console.log('[PWA] Canceling edit');
+    setEditingNoteId(null);
+    setEditTitle('');
+    setEditBody('');
+    setError(null);
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -208,6 +269,65 @@ export default function HomePage(): JSX.Element {
           </div>
         </div>
 
+        {/* Edit Note Section */}
+        {editingNoteId && (
+          <div className="bg-white rounded-lg shadow p-6 mb-8 border-2 border-blue-500">
+            <h2 className="text-xl font-semibold mb-4">Edit Note</h2>
+
+            <div className="space-y-4">
+              {/* Title Input */}
+              <div>
+                <label htmlFor="edit-title" className="block text-sm font-medium text-gray-700 mb-2">
+                  Title
+                </label>
+                <input
+                  id="edit-title"
+                  type="text"
+                  data-testid="edit-note-title-input"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Note title..."
+                />
+              </div>
+
+              {/* Body Textarea */}
+              <div>
+                <label htmlFor="edit-body" className="block text-sm font-medium text-gray-700 mb-2">
+                  Content
+                </label>
+                <textarea
+                  id="edit-body"
+                  data-testid="edit-note-body-textarea"
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  rows={10}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono"
+                  placeholder="Write your note content here..."
+                />
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-4">
+                <button
+                  data-testid="save-note-button"
+                  onClick={handleSaveEdit}
+                  className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
+                >
+                  Save Changes
+                </button>
+                <button
+                  data-testid="cancel-edit-button"
+                  onClick={handleCancelEdit}
+                  className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Notes List */}
         <div className="bg-white rounded-lg shadow p-6">
           <h2 className="text-xl font-semibold mb-4">
@@ -223,12 +343,18 @@ export default function HomePage(): JSX.Element {
                 <div
                   key={note.note_id}
                   data-testid="note-item"
-                  className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors"
+                  onClick={() => handleEditNote(note)}
+                  className="p-4 border border-gray-200 rounded-lg hover:border-blue-300 hover:bg-blue-50 transition-colors cursor-pointer"
                 >
                   <h3 className="font-medium text-gray-900">{note.title}</h3>
                   <p className="text-sm text-gray-500 mt-1">
                     Updated: {new Date(note.updated_at).toLocaleString()}
                   </p>
+                  {note.body && note.body.trim() && (
+                    <p className="text-sm text-gray-600 mt-2 line-clamp-2">
+                      {note.body}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
