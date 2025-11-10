@@ -83,6 +83,7 @@ export default function HomePage(): JSX.Element {
             'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             ['root', '/', null, now, now]
           );
+          await database.sync();
           console.log('[PWA] Created root folder');
         }
 
@@ -179,6 +180,7 @@ export default function HomePage(): JSX.Element {
         [folderId, newFolderName, 'root', now, now]
       );
 
+      await db.sync();
       console.log('[PWA] Folder created successfully:', folderId);
 
       // Clear input
@@ -219,6 +221,7 @@ export default function HomePage(): JSX.Element {
         [renameFolderName, now, renameFolderId]
       );
 
+      await db.sync();
       console.log('[PWA] Folder renamed successfully');
 
       // Clear rename state
@@ -263,6 +266,7 @@ export default function HomePage(): JSX.Element {
         [deleteFolderConfirmId]
       );
 
+      await db.sync();
       console.log('[PWA] Folder deleted successfully');
 
       // Clear delete confirmation state
@@ -318,6 +322,7 @@ export default function HomePage(): JSX.Element {
         [noteId, newNoteTitle, '', selectedFolderId, now, now]
       );
 
+      await db.sync();
       console.log('[PWA] Note created successfully:', noteId);
 
       // Clear input
@@ -364,6 +369,7 @@ export default function HomePage(): JSX.Element {
         [editTitle, editBody, now, editingNoteId]
       );
 
+      await db.sync();
       console.log('[PWA] Note updated successfully');
 
       // Close edit mode
@@ -413,6 +419,7 @@ export default function HomePage(): JSX.Element {
         [deleteConfirmNoteId]
       );
 
+      await db.sync();
       console.log('[PWA] Note deleted successfully');
 
       // Close confirmation dialog
