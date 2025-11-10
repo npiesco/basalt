@@ -69,12 +69,17 @@ export default function HomePage(): JSX.Element {
         // Ensure root folder exists
         const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
 
+        // DEBUG: Check all folders first
+        const allFoldersCheck = await executeQuery(database, 'SELECT * FROM folders', []);
+        console.log('[PWA] DEBUG: All folders count:', allFoldersCheck.rows.length);
+
         // Try to get or create root folder
         const rootFolderResult = await executeQuery(
           database,
           'SELECT folder_id FROM folders WHERE folder_id = ?',
           ['root']
         );
+        console.log('[PWA] DEBUG: Root folder query result:', rootFolderResult.rows.length, 'rows');
 
         if (rootFolderResult.rows.length === 0) {
           const now = new Date().toISOString();
@@ -85,6 +90,8 @@ export default function HomePage(): JSX.Element {
           );
           await database.sync();
           console.log('[PWA] Created root folder');
+        } else {
+          console.log('[PWA] Root folder already exists');
         }
 
         // Load existing notes and folders

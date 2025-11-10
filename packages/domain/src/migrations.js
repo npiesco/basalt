@@ -48,23 +48,21 @@ CREATE TABLE IF NOT EXISTS backlinks (
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+  note_id UNINDEXED,
   title,
-  body,
-  content='notes',
-  content_rowid='rowid'
+  body
 );
 
 CREATE TRIGGER IF NOT EXISTS notes_fts_ai AFTER INSERT ON notes BEGIN
-  INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+  INSERT INTO notes_fts(note_id, title, body) VALUES (new.note_id, new.title, new.body);
 END;
 
 CREATE TRIGGER IF NOT EXISTS notes_fts_ad AFTER DELETE ON notes BEGIN
-  INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
+  DELETE FROM notes_fts WHERE note_id = old.note_id;
 END;
 
 CREATE TRIGGER IF NOT EXISTS notes_fts_au AFTER UPDATE ON notes BEGIN
-  INSERT INTO notes_fts(notes_fts, rowid, title, body) VALUES ('delete', old.rowid, old.title, old.body);
-  INSERT INTO notes_fts(rowid, title, body) VALUES (new.rowid, new.title, new.body);
+  UPDATE notes_fts SET title = new.title, body = new.body WHERE note_id = old.note_id;
 END;
 `.trim();
 
