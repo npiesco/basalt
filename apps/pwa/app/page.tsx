@@ -61,15 +61,23 @@ export default function HomePage(): JSX.Element {
         // Expose database to window for E2E testing
         if (typeof window !== 'undefined') {
           const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+          const absurderSql = await import('@npiesco/absurder-sql');
+
+          // Expose both the instance API AND the raw Database class
           (window as any).basaltDb = {
             executeQuery: async (sql: string, params: any[]) => {
               return executeQuery(database, sql, params);
             }
           };
+          (window as any).Database = absurderSql.Database;
         }
 
         // Ensure root folder exists
         const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+        // DEBUG: Check all folders first
+        const allFoldersCheck = await executeQuery(database, 'SELECT * FROM folders', []);
+        console.log('[PWA] DEBUG: All folders count:', allFoldersCheck.rows.length);
 
         // Try to get or create root folder
         const rootFolderResult = await executeQuery(
@@ -77,6 +85,7 @@ export default function HomePage(): JSX.Element {
           'SELECT folder_id FROM folders WHERE folder_id = ?',
           ['root']
         );
+        console.log('[PWA] DEBUG: Root folder query result:', rootFolderResult.rows.length, 'rows');
 
         if (rootFolderResult.rows.length === 0) {
           const now = new Date().toISOString();
@@ -88,6 +97,8 @@ export default function HomePage(): JSX.Element {
           // CRITICAL: Persist to IndexedDB
           await database.sync();
           console.log('[PWA] Created root folder');
+        } else {
+          console.log('[PWA] Root folder already exists');
         }
 
         // Load existing notes and folders
