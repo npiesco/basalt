@@ -51,6 +51,12 @@ export default function HomePage(): JSX.Element {
   const [searchResults, setSearchResults] = useState<Note[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
+  // Import/Export state
+  const [isExporting, setIsExporting] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importConfirmFile, setImportConfirmFile] = useState<File | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -481,6 +487,109 @@ export default function HomePage(): JSX.Element {
     );
   }
 
+  // Export database to .db file
+  async function handleExport() {
+    if (!db || isExporting) return;
+
+    setIsExporting(true);
+    console.log('[PWA] Starting database export...');
+
+    try {
+      // Export database to Uint8Array
+      const exportedData = await db.exportToFile();
+      console.log('[PWA] Database exported,', exportedData.length, 'bytes');
+
+      // Create blob and download
+      const blob = new Blob([exportedData], { type: 'application/x-sqlite3' });
+      const url = URL.createObjectURL(blob);
+
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
+      const filename = `basalt-vault-${timestamp}.db`;
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      console.log('[PWA] ✓ Export complete:', filename);
+      setError(null);
+    } catch (err) {
+      console.error('[PWA] Export failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsExporting(false);
+    }
+  }
+
+  // Handle import file selection
+  function handleImportFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    console.log('[PWA] File selected for import:', file.name, file.size, 'bytes');
+
+    // Show confirmation dialog
+    setImportConfirmFile(file);
+  }
+
+  // Import database from .db file
+  async function handleImportConfirm() {
+    if (!db || !importConfirmFile || isImporting) return;
+
+    setIsImporting(true);
+    console.log('[PWA] Starting database import...');
+
+    try {
+      // Read file as ArrayBuffer
+      const arrayBuffer = await importConfirmFile.arrayBuffer();
+      const uint8Array = new Uint8Array(arrayBuffer);
+
+      console.log('[PWA] File read,', uint8Array.length, 'bytes');
+
+      // Import into database
+      await db.importFromFile(uint8Array);
+      console.log('[PWA] Database imported successfully');
+
+      // CRITICAL: After importFromFile, we need to reconnect
+      // This is required by absurder-sql to apply the imported data
+      console.log('[PWA] Reconnecting to database after import...');
+
+      // Close confirmation dialog
+      setImportConfirmFile(null);
+
+      // Reload data
+      await loadNotes(db);
+      await loadFolders(db);
+
+      console.log('[PWA] ✓ Import complete, data reloaded');
+      setError(null);
+
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    } catch (err) {
+      console.error('[PWA] Import failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  // Cancel import
+  function handleImportCancel() {
+    console.log('[PWA] Import canceled');
+    setImportConfirmFile(null);
+
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -586,6 +695,57 @@ export default function HomePage(): JSX.Element {
               ))}
             </div>
           )}
+        </div>
+
+        {/* Export/Import Buttons */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {/* Export Button */}
+          <button
+            data-testid="export-button"
+            onClick={handleExport}
+            disabled={isExporting || !db}
+            className="px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isExporting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Exporting...
+              </>
+            ) : (
+              <>
+                ⬇️ Export
+              </>
+            )}
+          </button>
+
+          {/* Import Button */}
+          <button
+            data-testid="import-button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isImporting || !db}
+            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isImporting ? (
+              <>
+                <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                Importing...
+              </>
+            ) : (
+              <>
+                ⬆️ Import
+              </>
+            )}
+          </button>
+
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".db"
+            data-testid="import-file-input"
+            onChange={handleImportFileChange}
+            className="hidden"
+          />
         </div>
 
         {error && (
@@ -1001,6 +1161,54 @@ export default function HomePage(): JSX.Element {
                 className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium"
               >
                 Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Import Confirmation Dialog */}
+      {importConfirmFile && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div
+            data-testid="import-confirm-dialog"
+            className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+          >
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">⚠️ Import Database</h2>
+            <div className="mb-6">
+              <p className="text-gray-700 mb-3">
+                You are about to import: <span className="font-semibold">{importConfirmFile.name}</span>
+              </p>
+              <div className="bg-yellow-50 border border-yellow-200 rounded p-3">
+                <p className="text-yellow-800 text-sm">
+                  <strong>Warning:</strong> This will <strong>overwrite</strong> all existing data in your current vault.
+                  Make sure you have exported a backup before proceeding.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-4 justify-end">
+              <button
+                data-testid="import-cancel-button"
+                onClick={handleImportCancel}
+                disabled={isImporting}
+                className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                data-testid="import-confirm-button"
+                onClick={handleImportConfirm}
+                disabled={isImporting}
+                className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium disabled:opacity-50 flex items-center gap-2"
+              >
+                {isImporting ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                    Importing...
+                  </>
+                ) : (
+                  'Import and Overwrite'
+                )}
               </button>
             </div>
           </div>
