@@ -31,6 +31,10 @@ export default function HomePage(): JSX.Element {
 
   // Folder management state
   const [newFolderName, setNewFolderName] = useState('');
+  const [renameFolderId, setRenameFolderId] = useState<string | null>(null);
+  const [renameFolderName, setRenameFolderName] = useState('');
+  const [deleteFolderConfirmId, setDeleteFolderConfirmId] = useState<string | null>(null);
+  const [deleteFolderConfirmName, setDeleteFolderConfirmName] = useState('');
 
   // Edit state
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -187,6 +191,105 @@ export default function HomePage(): JSX.Element {
       console.error('[PWA] Failed to create folder:', err);
       setError(err instanceof Error ? err.message : String(err));
     }
+  }
+
+  function handleRenameClick(folder: Folder) {
+    console.log('[PWA] Rename requested for folder:', folder.folder_id);
+    setRenameFolderId(folder.folder_id);
+    setRenameFolderName(folder.name);
+  }
+
+  async function handleConfirmRename() {
+    if (!db || !renameFolderId) return;
+
+    if (!renameFolderName.trim()) {
+      setError('Folder name cannot be empty');
+      return;
+    }
+
+    try {
+      console.log('[PWA] Renaming folder:', renameFolderId, 'to', renameFolderName);
+
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const now = new Date().toISOString();
+
+      await executeQuery(
+        db,
+        'UPDATE folders SET name = ?, updated_at = ? WHERE folder_id = ?',
+        [renameFolderName, now, renameFolderId]
+      );
+
+      console.log('[PWA] Folder renamed successfully');
+
+      // Clear rename state
+      setRenameFolderId(null);
+      setRenameFolderName('');
+      setError(null);
+
+      // Reload folders
+      await loadFolders(db);
+    } catch (err) {
+      console.error('[PWA] Failed to rename folder:', err);
+      setError(err instanceof Error ? err.message : String(err));
+      setRenameFolderId(null);
+      setRenameFolderName('');
+    }
+  }
+
+  function handleCancelRename() {
+    console.log('[PWA] Rename canceled');
+    setRenameFolderId(null);
+    setRenameFolderName('');
+  }
+
+  function handleDeleteFolderClick(folder: Folder) {
+    console.log('[PWA] Delete requested for folder:', folder.folder_id);
+    setDeleteFolderConfirmId(folder.folder_id);
+    setDeleteFolderConfirmName(folder.name);
+  }
+
+  async function handleConfirmFolderDelete() {
+    if (!db || !deleteFolderConfirmId) return;
+
+    try {
+      console.log('[PWA] Deleting folder:', deleteFolderConfirmId);
+
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      // Delete folder (CASCADE will delete notes in this folder)
+      await executeQuery(
+        db,
+        'DELETE FROM folders WHERE folder_id = ?',
+        [deleteFolderConfirmId]
+      );
+
+      console.log('[PWA] Folder deleted successfully');
+
+      // Clear delete confirmation state
+      setDeleteFolderConfirmId(null);
+      setDeleteFolderConfirmName('');
+      setError(null);
+
+      // If the deleted folder was selected, switch to root
+      if (selectedFolderId === deleteFolderConfirmId) {
+        setSelectedFolderId('root');
+      }
+
+      // Reload folders and notes
+      await loadFolders(db);
+      await loadNotes(db);
+    } catch (err) {
+      console.error('[PWA] Failed to delete folder:', err);
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleteFolderConfirmId(null);
+      setDeleteFolderConfirmName('');
+    }
+  }
+
+  function handleCancelFolderDelete() {
+    console.log('[PWA] Folder delete canceled');
+    setDeleteFolderConfirmId(null);
+    setDeleteFolderConfirmName('');
   }
 
   async function handleCreateNote() {
@@ -417,13 +520,105 @@ export default function HomePage(): JSX.Element {
                 data-testid="folder-item"
                 className="p-3 border border-gray-200 rounded-lg bg-gray-50"
               >
-                <div className="flex items-center">
+                <div className="flex items-center justify-between">
                   <span className="text-gray-700 font-medium">📁 {folder.name}</span>
+                  {folder.folder_id !== 'root' && (
+                    <div className="flex gap-2">
+                      <button
+                        data-testid="rename-folder-button"
+                        onClick={() => handleRenameClick(folder)}
+                        className="px-3 py-1 text-sm bg-blue-100 text-blue-700 rounded hover:bg-blue-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors"
+                      >
+                        Rename
+                      </button>
+                      <button
+                        data-testid="delete-folder-button"
+                        onClick={() => handleDeleteFolderClick(folder)}
+                        className="px-3 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
           </div>
         </div>
+
+        {/* Rename Folder Dialog */}
+        {renameFolderId && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div
+              data-testid="rename-folder-dialog"
+              className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+            >
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Rename Folder</h2>
+              <input
+                data-testid="rename-folder-input"
+                type="text"
+                value={renameFolderName}
+                onChange={(e) => setRenameFolderName(e.target.value)}
+                onKeyPress={(e) => {
+                  if (e.key === 'Enter') {
+                    handleConfirmRename();
+                  }
+                }}
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mb-4"
+                placeholder="Enter new folder name..."
+                autoFocus
+              />
+              <div className="flex gap-4 justify-end">
+                <button
+                  data-testid="cancel-rename-button"
+                  onClick={handleCancelRename}
+                  className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  data-testid="confirm-rename-button"
+                  onClick={handleConfirmRename}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium"
+                >
+                  Rename
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delete Folder Confirmation Dialog */}
+        {deleteFolderConfirmId && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div
+              data-testid="delete-folder-confirm-dialog"
+              className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full mx-4"
+            >
+              <h2 className="text-xl font-semibold text-gray-900 mb-4">Delete Folder</h2>
+              <p className="text-gray-700 mb-6">
+                Are you sure you want to delete "{deleteFolderConfirmName}"?
+                <span className="font-semibold text-red-600"> This will also delete all notes in this folder.</span> This action cannot be undone.
+              </p>
+              <div className="flex gap-4 justify-end">
+                <button
+                  data-testid="cancel-folder-delete-button"
+                  onClick={handleCancelFolderDelete}
+                  className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  data-testid="confirm-folder-delete-button"
+                  onClick={handleConfirmFolderDelete}
+                  className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 font-medium"
+                >
+                  Delete Folder
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Create Note Section */}
         <div className="bg-white rounded-lg shadow p-6 mb-8">
