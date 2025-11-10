@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { initBasaltDb } from '../lib/db/client';
 
 interface Note {
@@ -22,6 +22,7 @@ interface Folder {
 
 export default function HomePage(): JSX.Element {
   const [db, setDb] = useState<any>(null);
+  const dbRef = useRef<any>(null); // Ref to hold database for cleanup handlers
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isReady, setIsReady] = useState(false);
@@ -55,6 +56,7 @@ export default function HomePage(): JSX.Element {
 
         console.log('[PWA] Database initialized successfully');
         setDb(database);
+        dbRef.current = database; // Store in ref for cleanup handlers
 
         // Expose database to window for E2E testing
         if (typeof window !== 'undefined') {
@@ -83,6 +85,8 @@ export default function HomePage(): JSX.Element {
             'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             ['root', '/', null, now, now]
           );
+          // CRITICAL: Persist to IndexedDB
+          await database.sync();
           console.log('[PWA] Created root folder');
         }
 
@@ -99,7 +103,35 @@ export default function HomePage(): JSX.Element {
     }
 
     initializeDatabase();
-  }, []);
+
+    // CRITICAL: Close database on page unload to ensure IndexedDB persistence
+    // Based on MultiTabDatabase wrapper pattern (line 32-38)
+    const handleBeforeUnload = () => {
+      console.log('[PWA] Page unloading, closing database for persistence');
+      if (dbRef.current) {
+        dbRef.current.close().catch((err: Error) => {
+          console.error('[PWA] Error closing database on unload:', err);
+        });
+      }
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('beforeunload', handleBeforeUnload);
+    }
+
+    // Cleanup on component unmount
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      }
+      if (dbRef.current) {
+        console.log('[PWA] Component unmounting, closing database');
+        dbRef.current.close().catch((err: Error) => {
+          console.error('[PWA] Error closing database on unmount:', err);
+        });
+      }
+    };
+  }, []); // Empty deps - only run once on mount
 
   async function loadNotes(database: any) {
     try {
@@ -179,6 +211,8 @@ export default function HomePage(): JSX.Element {
         [folderId, newFolderName, 'root', now, now]
       );
 
+      // CRITICAL: Persist to IndexedDB
+      await db.sync();
       console.log('[PWA] Folder created successfully:', folderId);
 
       // Clear input
@@ -219,6 +253,8 @@ export default function HomePage(): JSX.Element {
         [renameFolderName, now, renameFolderId]
       );
 
+      // CRITICAL: Persist to IndexedDB
+      await db.sync();
       console.log('[PWA] Folder renamed successfully');
 
       // Clear rename state
@@ -263,6 +299,8 @@ export default function HomePage(): JSX.Element {
         [deleteFolderConfirmId]
       );
 
+      // CRITICAL: Persist to IndexedDB
+      await db.sync();
       console.log('[PWA] Folder deleted successfully');
 
       // Clear delete confirmation state
@@ -318,7 +356,10 @@ export default function HomePage(): JSX.Element {
         [noteId, newNoteTitle, '', selectedFolderId, now, now]
       );
 
-      console.log('[PWA] Note created successfully:', noteId);
+      // CRITICAL: Persist to IndexedDB
+      console.log('[PWA] Syncing to IndexedDB...');
+      await db.sync();
+      console.log('[PWA] Sync complete! Note created successfully:', noteId);
 
       // Clear input
       setNewNoteTitle('');
@@ -364,6 +405,8 @@ export default function HomePage(): JSX.Element {
         [editTitle, editBody, now, editingNoteId]
       );
 
+      // CRITICAL: Persist to IndexedDB
+      await db.sync();
       console.log('[PWA] Note updated successfully');
 
       // Close edit mode
@@ -413,6 +456,8 @@ export default function HomePage(): JSX.Element {
         [deleteConfirmNoteId]
       );
 
+      // CRITICAL: Persist to IndexedDB
+      await db.sync();
       console.log('[PWA] Note deleted successfully');
 
       // Close confirmation dialog
