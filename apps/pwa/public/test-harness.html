@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Database Import Test Harness</title>
+</head>
+<body>
+  <h1>Database Import Test Harness</h1>
+  <div id="status">Initializing...</div>
+
+  <script type="module">
+    // Import absurder-sql from node_modules
+    import * as absurderSql from '/node_modules/@npiesco/absurder-sql/pkg/absurder_sql.js';
+
+    // Import our dbClient functions
+    import { initDb, executeQuery, exportToFile, importFromFile } from '/packages/domain/src/dbClient.js';
+    import { generateInitialMigration } from '/packages/domain/src/migrations.js';
+
+    console.log('[Harness] Starting initialization...');
+
+    // Initialize WASM
+    const wasmUrl = '/node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm';
+    const response = await fetch(wasmUrl);
+    const wasmBuffer = await response.arrayBuffer();
+    await absurderSql.default(wasmBuffer);
+
+    console.log('[Harness] WASM initialized');
+
+    // Make everything available globally for tests
+    window.absurderSql = absurderSql;
+    window.dbClient = {
+      initDb,
+      executeQuery,
+      exportToFile,
+      importFromFile,
+    };
+    window.generateInitialMigration = generateInitialMigration;
+    window.testHarnessReady = true;
+
+    document.getElementById('status').textContent = '✓ Ready for testing';
+    console.log('[Harness] Ready for testing');
+  </script>
+</body>
+</html>

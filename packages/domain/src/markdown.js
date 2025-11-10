@@ -1,6 +1,7 @@
-import { createBacklinkRecord } from './models.js';
+import { createBacklinkRecord, createTagRecord } from './models.js';
 
 const WIKI_LINK_PATTERN = /(?<!\!)\[\[([^[\]|]+?)(?:\|[^[\]]+)?\]\]/g;
+const TAG_PATTERN = /#([\w-]+)/g;
 
 function normalizeWikiTarget(rawTarget) {
   if (!rawTarget) return '';
@@ -36,6 +37,33 @@ export function deriveBacklinkRecords({
       sourceNoteId,
       targetNoteId,
       contextSnippet: '',
+      createdAt,
+    }),
+  );
+}
+
+export function extractTags(markdown = '') {
+  const normalizedTags = new Set();
+  let match;
+
+  while ((match = TAG_PATTERN.exec(markdown)) !== null) {
+    const normalized = match[1].toLowerCase();
+    if (normalized) {
+      normalizedTags.add(normalized);
+    }
+  }
+
+  return Array.from(normalizedTags);
+}
+
+export function deriveTagRecords({
+  markdown = '',
+  clock = () => new Date().toISOString(),
+} = {}) {
+  const createdAt = clock();
+  return extractTags(markdown).map((label) =>
+    createTagRecord({
+      label,
       createdAt,
     }),
   );

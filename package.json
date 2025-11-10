@@ -11,5 +11,9 @@
     "build": "npm run build --workspace=@basalt/pwa && npm run build --workspace=@basalt/desktop",
     "lint": "npm run lint --workspace=@basalt/pwa",
     "test": "node --test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "http-server": "^14.1.1"
   }
 }
