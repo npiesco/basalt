@@ -12,12 +12,25 @@ interface Note {
   updated_at: string;
 }
 
+interface Folder {
+  folder_id: string;
+  name: string;
+  parent_folder_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export default function HomePage(): JSX.Element {
   const [db, setDb] = useState<any>(null);
   const [notes, setNotes] = useState<Note[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
   const [isReady, setIsReady] = useState(false);
   const [newNoteTitle, setNewNoteTitle] = useState('');
+  const [selectedFolderId, setSelectedFolderId] = useState<string>('root');
   const [error, setError] = useState<string | null>(null);
+
+  // Folder management state
+  const [newFolderName, setNewFolderName] = useState('');
 
   // Edit state
   const [editingNoteId, setEditingNoteId] = useState<string | null>(null);
@@ -69,8 +82,9 @@ export default function HomePage(): JSX.Element {
           console.log('[PWA] Created root folder');
         }
 
-        // Load existing notes
+        // Load existing notes and folders
         await loadNotes(database);
+        await loadFolders(database);
 
         setIsReady(true);
         console.log('[PWA] App ready');
@@ -110,6 +124,71 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  async function loadFolders(database: any) {
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const result = await executeQuery(
+        database,
+        'SELECT folder_id, name, parent_folder_id, created_at, updated_at FROM folders ORDER BY name ASC',
+        []
+      );
+
+      const folderList: Folder[] = result.rows.map((row: any) => {
+        const folder: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          folder[col] = value.type === 'Null' ? null : value.value;
+        });
+        return folder as Folder;
+      });
+
+      setFolders(folderList);
+      console.log('[PWA] Loaded folders:', folderList.length);
+    } catch (err) {
+      console.error('[PWA] Failed to load folders:', err);
+    }
+  }
+
+  async function handleCreateFolder() {
+    if (!db) {
+      setError('Database not initialized');
+      return;
+    }
+
+    if (!newFolderName.trim()) {
+      setError('Folder name cannot be empty');
+      return;
+    }
+
+    try {
+      console.log('[PWA] Creating folder:', newFolderName);
+
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const folderId = `folder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date().toISOString();
+
+      await executeQuery(
+        db,
+        'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [folderId, newFolderName, 'root', now, now]
+      );
+
+      console.log('[PWA] Folder created successfully:', folderId);
+
+      // Clear input
+      setNewFolderName('');
+      setError(null);
+
+      // Reload folders
+      await loadFolders(db);
+    } catch (err) {
+      console.error('[PWA] Failed to create folder:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   async function handleCreateNote() {
     if (!db) {
       setError('Database not initialized');
@@ -133,7 +212,7 @@ export default function HomePage(): JSX.Element {
       await executeQuery(
         db,
         'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [noteId, newNoteTitle, '', 'root', now, now]
+        [noteId, newNoteTitle, '', selectedFolderId, now, now]
       );
 
       console.log('[PWA] Note created successfully:', noteId);
@@ -302,9 +381,74 @@ export default function HomePage(): JSX.Element {
           </div>
         )}
 
+        {/* Folder Management Section */}
+        <div className="bg-white rounded-lg shadow p-6 mb-8">
+          <h2 className="text-xl font-semibold mb-4">Folders</h2>
+
+          {/* Create Folder */}
+          <div className="flex gap-4 mb-4">
+            <input
+              type="text"
+              data-testid="folder-name-input"
+              value={newFolderName}
+              onChange={(e) => setNewFolderName(e.target.value)}
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handleCreateFolder();
+                }
+              }}
+              placeholder="Enter folder name..."
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500"
+            />
+            <button
+              data-testid="create-folder-button"
+              onClick={handleCreateFolder}
+              className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 font-medium"
+            >
+              Create Folder
+            </button>
+          </div>
+
+          {/* Folder List */}
+          <div className="space-y-2">
+            {folders.map((folder) => (
+              <div
+                key={folder.folder_id}
+                data-testid="folder-item"
+                className="p-3 border border-gray-200 rounded-lg bg-gray-50"
+              >
+                <div className="flex items-center">
+                  <span className="text-gray-700 font-medium">📁 {folder.name}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Create Note Section */}
         <div className="bg-white rounded-lg shadow p-6 mb-8">
           <h2 className="text-xl font-semibold mb-4">Create New Note</h2>
+
+          {/* Folder Selector */}
+          <div className="mb-4">
+            <label htmlFor="folder-select" className="block text-sm font-medium text-gray-700 mb-2">
+              Folder
+            </label>
+            <select
+              id="folder-select"
+              data-testid="note-folder-select"
+              value={selectedFolderId}
+              onChange={(e) => setSelectedFolderId(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              {folders.map((folder) => (
+                <option key={folder.folder_id} value={folder.folder_id}>
+                  {folder.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <div className="flex gap-4">
             <input
               type="text"
@@ -452,9 +596,16 @@ export default function HomePage(): JSX.Element {
                   <div className="flex justify-between items-start">
                     <div className="flex-1">
                       <h3 className="font-medium text-gray-900">{note.title}</h3>
-                      <p className="text-sm text-gray-500 mt-1">
-                        Updated: {new Date(note.updated_at).toLocaleString()}
-                      </p>
+                      <div className="flex items-center gap-3 mt-1">
+                        <p className="text-sm text-gray-500">
+                          Updated: {new Date(note.updated_at).toLocaleString()}
+                        </p>
+                        {note.folder_id && (
+                          <p className="text-sm text-green-600 font-medium">
+                            📁 {folders.find(f => f.folder_id === note.folder_id)?.name || 'Unknown'}
+                          </p>
+                        )}
+                      </div>
                       {note.body && note.body.trim() && (
                         <p className="text-sm text-gray-600 mt-2 line-clamp-2">
                           {note.body}
