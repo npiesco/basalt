@@ -59,11 +59,15 @@ export default function HomePage(): JSX.Element {
         // Expose database to window for E2E testing
         if (typeof window !== 'undefined') {
           const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+          const absurderSql = await import('@npiesco/absurder-sql');
+
+          // Expose both the instance API AND the raw Database class
           (window as any).basaltDb = {
             executeQuery: async (sql: string, params: any[]) => {
               return executeQuery(database, sql, params);
             }
           };
+          (window as any).Database = absurderSql.Database;
         }
 
         // Ensure root folder exists
