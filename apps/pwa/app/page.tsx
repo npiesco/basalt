@@ -46,6 +46,11 @@ export default function HomePage(): JSX.Element {
   const [deleteConfirmNoteId, setDeleteConfirmNoteId] = useState<string | null>(null);
   const [deleteConfirmTitle, setDeleteConfirmTitle] = useState('');
 
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Note[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -390,6 +395,92 @@ export default function HomePage(): JSX.Element {
     setDeleteConfirmTitle('');
   }
 
+  // Search functionality using FTS5
+  async function performSearch(query: string) {
+    if (!db || !query.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      // FTS5 search query - searches both title and body
+      // FTS5 is case-insensitive by default for ASCII characters
+      console.log('[PWA] Executing FTS5 search for:', query);
+      const result = await executeQuery(
+        db,
+        `SELECT n.note_id, n.title, n.body, n.folder_id, n.created_at, n.updated_at
+         FROM notes n
+         WHERE n.note_id IN (
+           SELECT note_id FROM notes_fts WHERE notes_fts MATCH ?
+         )
+         ORDER BY n.updated_at DESC
+         LIMIT 50`,
+        [query]
+      );
+      console.log('[PWA] FTS5 query returned', result.rows.length, 'rows');
+
+      const results: Note[] = result.rows.map((row: any) => {
+        const note: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          note[col] = value.type === 'Null' ? null : value.value;
+        });
+        return note as Note;
+      });
+
+      setSearchResults(results);
+      console.log('[PWA] Search found', results.length, 'results for:', query);
+    } catch (err) {
+      console.error('[PWA] Search failed:', err);
+      setSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  }
+
+  // Debounced search effect
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery) {
+        performSearch(searchQuery);
+      } else {
+        setSearchResults([]);
+      }
+    }, 300); // 300ms debounce
+
+    return () => clearTimeout(timer);
+  }, [searchQuery, db]);
+
+  function handleSearchResultClick(note: Note) {
+    setSelectedNoteId(note.note_id);
+    setEditTitle(note.title);
+    setEditBody(note.body || '');
+    setError(null);
+    // Optionally clear search
+    // setSearchQuery('');
+  }
+
+  // Highlight search terms in text
+  function highlightText(text: string, query: string): React.ReactNode {
+    if (!query.trim()) return text;
+
+    const parts = text.split(new RegExp(`(${query})`, 'gi'));
+    return parts.map((part, index) =>
+      part.toLowerCase() === query.toLowerCase() ? (
+        <mark key={index} className="bg-yellow-200 font-semibold">
+          {part}
+        </mark>
+      ) : (
+        part
+      )
+    );
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -419,13 +510,86 @@ export default function HomePage(): JSX.Element {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col" data-testid="app-ready">
       {/* Top Header Bar */}
-      <header className="bg-white border-b border-gray-300 px-4 py-3 flex items-center justify-between flex-shrink-0">
-        <div>
+      <header className="bg-white border-b border-gray-300 px-4 py-3 flex items-center gap-4 flex-shrink-0">
+        <div className="flex-shrink-0">
           <h1 className="text-2xl font-bold text-gray-900">Basalt</h1>
           <p className="text-xs text-gray-600">Your local-first knowledge base</p>
         </div>
+
+        {/* Search Input */}
+        <div className="flex-1 max-w-2xl relative">
+          <div className="relative">
+            <input
+              type="text"
+              data-testid="search-input"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search notes... (FTS5 powered)"
+              className="w-full px-4 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {isSearching && (
+              <div className="absolute right-3 top-1/2 transform -translate-y-1/2">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              </div>
+            )}
+            {searchQuery && !isSearching && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
+          {/* Search Results Dropdown */}
+          {searchQuery && (
+            <div
+              data-testid="search-results"
+              className="absolute z-50 w-full mt-2 bg-white border border-gray-300 rounded-lg shadow-lg max-h-96 overflow-y-auto"
+            >
+              {searchResults.length === 0 && !isSearching && (
+                <div data-testid="search-empty-state" className="p-6 text-center text-gray-500">
+                  <svg className="w-12 h-12 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <p>No results found for "{searchQuery}"</p>
+                </div>
+              )}
+
+              {searchResults.map((note) => (
+                <div
+                  key={note.note_id}
+                  data-testid="search-result-item"
+                  onClick={() => handleSearchResultClick(note)}
+                  className="p-4 border-b border-gray-100 hover:bg-blue-50 cursor-pointer transition-colors"
+                >
+                  <h3 data-testid="result-title" className="font-medium text-gray-900 mb-1">
+                    {highlightText(note.title, searchQuery)}
+                  </h3>
+                  {note.body && (
+                    <p data-testid="result-snippet" className="text-sm text-gray-600 line-clamp-2">
+                      {highlightText(
+                        note.body.substring(0, 200) + (note.body.length > 200 ? '...' : ''),
+                        searchQuery
+                      )}
+                    </p>
+                  )}
+                  <div className="flex items-center gap-2 mt-2 text-xs text-gray-500">
+                    {note.folder_id && (
+                      <span>📁 {folders.find(f => f.folder_id === note.folder_id)?.name || 'Unknown'}</span>
+                    )}
+                    <span>•</span>
+                    <span>{new Date(note.updated_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded px-3 py-2 max-w-md">
+          <div className="bg-red-50 border border-red-200 rounded px-3 py-2">
             <p className="text-sm text-red-700">{error}</p>
           </div>
         )}
