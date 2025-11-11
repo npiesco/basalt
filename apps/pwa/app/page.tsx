@@ -63,6 +63,14 @@ export default function HomePage(): JSX.Element {
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
   const [quickAddTitle, setQuickAddTitle] = useState('');
 
+  // Gesture control state (use ref for immediate updates during event handlers)
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null);
+  const [longPressTimer, setLongPressTimer] = useState<NodeJS.Timeout | null>(null);
+  const [contextMenuNote, setContextMenuNote] = useState<Note | null>(null);
+  const [contextMenuPosition, setContextMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -630,6 +638,180 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  // Gesture: Handle touch start for swipe gestures
+  function handleTouchStart(e: React.TouchEvent) {
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY };
+  }
+
+  // Gesture: Handle mouse down for swipe gestures (for testing/desktop)
+  function handleMouseDownForSwipe(e: React.MouseEvent) {
+    touchStartRef.current = { x: e.clientX, y: e.clientY };
+  }
+
+  // Gesture: Handle touch move for swipe detection
+  function handleTouchMove(e: React.TouchEvent) {
+    if (!touchStartRef.current) return;
+
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - touchStartRef.current.x;
+    const deltaY = touch.clientY - touchStartRef.current.y;
+
+    // Detect horizontal swipe (deltaX > deltaY)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+      // Swipe right to open sidebar
+      if (deltaX > 0 && touchStartRef.current.x < 50 && !isLeftSidebarOpen) {
+        setIsLeftSidebarOpen(true);
+        touchStartRef.current = null;
+      }
+      // Swipe left to close sidebar
+      else if (deltaX < 0 && isLeftSidebarOpen) {
+        setIsLeftSidebarOpen(false);
+        touchStartRef.current = null;
+      }
+    }
+  }
+
+  // Gesture: Handle mouse move for swipe detection (for testing/desktop)
+  function handleMouseMoveForSwipe(e: React.MouseEvent) {
+    if (!touchStartRef.current) return;
+
+    // Only process if button is pressed (e.buttons & 1 means left button)
+    if ((e.buttons & 1) === 0) return;
+
+    const deltaX = e.clientX - touchStartRef.current.x;
+    const deltaY = e.clientY - touchStartRef.current.y;
+
+    // Detect horizontal swipe (deltaX > deltaY)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+      // Swipe right to open sidebar
+      if (deltaX > 0 && touchStartRef.current.x < 50 && !isLeftSidebarOpen) {
+        setIsLeftSidebarOpen(true);
+        touchStartRef.current = null;
+      }
+      // Swipe left to close sidebar
+      else if (deltaX < 0 && isLeftSidebarOpen) {
+        setIsLeftSidebarOpen(false);
+        touchStartRef.current = null;
+      }
+    }
+  }
+
+  // Gesture: Handle touch end
+  function handleTouchEnd() {
+    touchStartRef.current = null;
+  }
+
+  // Gesture: Handle mouse up (for testing/desktop)
+  function handleMouseUpForSwipe() {
+    touchStartRef.current = null;
+  }
+
+  // Gesture: Handle long press start on note
+  function handleNoteLongPressStart(note: Note, e: React.TouchEvent | React.MouseEvent) {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    // Start long press timer (600ms)
+    const timer = setTimeout(() => {
+      // Show context menu
+      setContextMenuNote(note);
+      setContextMenuPosition({ x: clientX, y: clientY });
+
+      // Also enter selection mode
+      setSelectionMode(true);
+      setSelectedNoteIds(new Set([note.note_id]));
+
+      console.log('[PWA] Long press detected on note:', note.note_id);
+    }, 600);
+
+    setLongPressTimer(timer);
+  }
+
+  // Gesture: Cancel long press
+  function handleNoteLongPressCancel() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      setLongPressTimer(null);
+    }
+  }
+
+  // Context menu: Delete note
+  async function handleContextMenuDelete() {
+    if (!contextMenuNote) return;
+
+    setDeleteConfirmNoteId(contextMenuNote.note_id);
+    setDeleteConfirmTitle(contextMenuNote.title);
+    setContextMenuNote(null);
+    setContextMenuPosition(null);
+  }
+
+  // Context menu: Rename note
+  function handleContextMenuRename() {
+    if (!contextMenuNote) return;
+
+    // Open edit mode for the note
+    setSelectedNoteId(contextMenuNote.note_id);
+    setEditTitle(contextMenuNote.title);
+    setEditBody(contextMenuNote.body || '');
+
+    setContextMenuNote(null);
+    setContextMenuPosition(null);
+    setIsLeftSidebarOpen(false);
+  }
+
+  // Selection mode: Toggle note selection
+  function handleToggleNoteSelection(noteId: string) {
+    if (!selectionMode) return;
+
+    const newSelected = new Set(selectedNoteIds);
+    if (newSelected.has(noteId)) {
+      newSelected.delete(noteId);
+    } else {
+      newSelected.add(noteId);
+    }
+    setSelectedNoteIds(newSelected);
+
+    // Exit selection mode if no notes selected
+    if (newSelected.size === 0) {
+      setSelectionMode(false);
+    }
+  }
+
+  // Selection mode: Bulk delete
+  async function handleBulkDelete() {
+    if (selectedNoteIds.size === 0) return;
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      for (const noteId of selectedNoteIds) {
+        await executeQuery(
+          db,
+          'DELETE FROM notes WHERE note_id = ?',
+          [noteId]
+        );
+        console.log('[PWA] Deleted note (bulk):', noteId);
+      }
+
+      // Clear selection and exit selection mode
+      setSelectedNoteIds(new Set());
+      setSelectionMode(false);
+
+      // Reload notes
+      await loadNotes();
+    } catch (err) {
+      console.error('[PWA] Bulk delete failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  // Selection mode: Cancel
+  function handleCancelSelection() {
+    setSelectionMode(false);
+    setSelectedNoteIds(new Set());
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -657,7 +839,16 @@ export default function HomePage(): JSX.Element {
   const selectedNote = notes.find(n => n.note_id === selectedNoteId);
 
   return (
-    <div className="min-h-screen bg-gray-100 flex flex-col" data-testid="app-ready">
+    <div
+      className="min-h-screen bg-gray-100 flex flex-col"
+      data-testid="app-ready"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onMouseDownCapture={handleMouseDownForSwipe}
+      onMouseMoveCapture={handleMouseMoveForSwipe}
+      onMouseUpCapture={handleMouseUpForSwipe}
+    >
       {/* Top Header Bar */}
       <header className="bg-white border-b border-gray-300 px-4 py-3 flex items-center gap-4 flex-shrink-0" style={{ position: 'relative', zIndex: 50 }}>
         {/* Mobile: Left Sidebar Toggle */}
@@ -929,9 +1120,18 @@ export default function HomePage(): JSX.Element {
                   <div
                     key={note.note_id}
                     data-testid="note-item"
-                    onClick={() => handleSelectNote(note)}
+                    data-selected={selectedNoteIds.has(note.note_id) ? 'true' : 'false'}
+                    onClick={() => selectionMode ? handleToggleNoteSelection(note.note_id) : handleSelectNote(note)}
+                    onTouchStart={(e) => handleNoteLongPressStart(note, e)}
+                    onTouchEnd={handleNoteLongPressCancel}
+                    onTouchMove={handleNoteLongPressCancel}
+                    onMouseDown={(e) => handleNoteLongPressStart(note, e)}
+                    onMouseUp={handleNoteLongPressCancel}
+                    onMouseLeave={handleNoteLongPressCancel}
                     className={`p-2 border rounded cursor-pointer transition-colors ${
-                      selectedNoteId === note.note_id
+                      selectedNoteIds.has(note.note_id)
+                        ? 'border-green-500 bg-green-100'
+                        : selectedNoteId === note.note_id
                         ? 'border-blue-500 bg-blue-50'
                         : 'border-gray-200 hover:border-blue-300 hover:bg-blue-50'
                     }`}
@@ -1334,6 +1534,79 @@ export default function HomePage(): JSX.Element {
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
         </svg>
       </button>
+
+      {/* Context Menu */}
+      {contextMenuNote && contextMenuPosition && (
+        <>
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => {
+              setContextMenuNote(null);
+              setContextMenuPosition(null);
+            }}
+          />
+          {/* Menu */}
+          <div
+            data-testid="note-context-menu"
+            className="fixed bg-white rounded-lg shadow-xl border border-gray-200 py-2 z-50"
+            style={{
+              top: `${contextMenuPosition.y}px`,
+              left: `${contextMenuPosition.x}px`,
+              minWidth: '200px'
+            }}
+          >
+            <button
+              data-testid="context-menu-rename"
+              onClick={handleContextMenuRename}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100 flex items-center gap-2"
+            >
+              <span>✏️</span> Rename
+            </button>
+            <button
+              data-testid="context-menu-delete"
+              onClick={handleContextMenuDelete}
+              className="w-full px-4 py-2 text-left text-sm hover:bg-red-100 text-red-600 flex items-center gap-2"
+            >
+              <span>🗑️</span> Delete
+            </button>
+          </div>
+        </>
+      )}
+
+      {/* Selection Mode Indicator */}
+      {selectionMode && (
+        <div
+          data-testid="selection-mode-active"
+          className="fixed top-16 left-0 right-0 bg-green-600 text-white py-2 px-4 z-40 flex items-center justify-between"
+        >
+          <span className="text-sm font-medium">
+            {selectedNoteIds.size} note{selectedNoteIds.size !== 1 ? 's' : ''} selected
+          </span>
+          <button
+            onClick={handleCancelSelection}
+            className="text-sm underline"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* Bulk Action Toolbar */}
+      {selectionMode && selectedNoteIds.size > 0 && (
+        <div
+          data-testid="bulk-action-toolbar"
+          className="fixed bottom-6 left-1/2 transform -translate-x-1/2 bg-gray-900 text-white rounded-full shadow-xl px-6 py-3 z-40 flex items-center gap-4"
+        >
+          <button
+            data-testid="bulk-delete-button"
+            onClick={handleBulkDelete}
+            className="flex items-center gap-2 text-sm hover:text-red-300"
+          >
+            <span>🗑️</span> Delete ({selectedNoteIds.size})
+          </button>
+        </div>
+      )}
 
       {/* Mobile: Sidebar Overlay */}
       {isLeftSidebarOpen && (
