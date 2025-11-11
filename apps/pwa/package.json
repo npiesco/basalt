@@ -9,7 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
-    "@npiesco/absurder-sql": "^0.1.14",
+    "@npiesco/absurder-sql": "^0.1.15",
     "next": "^16.0.1",
     "react": "18.3.1",
     "react-dom": "18.3.1"
