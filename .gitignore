@@ -58,6 +58,7 @@ Thumbs.db
 # Playwright
 /playwright-report/
 /test-results/
+**/test-results/
 /playwright/.cache/
 
 # Personal
