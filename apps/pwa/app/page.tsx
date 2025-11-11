@@ -57,6 +57,12 @@ export default function HomePage(): JSX.Element {
   const [importConfirmFile, setImportConfirmFile] = useState<File | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Mobile responsive state
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(false);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(false);
+  const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [quickAddTitle, setQuickAddTitle] = useState('');
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -590,6 +596,40 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  // Mobile: Quick add note
+  async function handleQuickAddSubmit() {
+    if (!db || !quickAddTitle.trim()) {
+      return;
+    }
+
+    try {
+      const noteId = `note-${Date.now()}`;
+      const now = new Date().toISOString();
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      await executeQuery(
+        db,
+        'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+        [noteId, quickAddTitle, '', selectedFolderId === 'root' ? null : selectedFolderId, now, now]
+      );
+
+      console.log('[PWA] Quick-added note:', noteId);
+
+      // Reload notes
+      await loadNotes();
+
+      // Close dialog and reset
+      setIsQuickAddOpen(false);
+      setQuickAddTitle('');
+
+      // Keep sidebar open so user can see the new note
+      setIsLeftSidebarOpen(true);
+    } catch (err) {
+      console.error('[PWA] Quick add failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -619,7 +659,19 @@ export default function HomePage(): JSX.Element {
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col" data-testid="app-ready">
       {/* Top Header Bar */}
-      <header className="bg-white border-b border-gray-300 px-4 py-3 flex items-center gap-4 flex-shrink-0">
+      <header className="bg-white border-b border-gray-300 px-4 py-3 flex items-center gap-4 flex-shrink-0" style={{ position: 'relative', zIndex: 50 }}>
+        {/* Mobile: Left Sidebar Toggle */}
+        <button
+          data-testid="toggle-left-sidebar"
+          onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
+          className="mobile-toggle"
+          aria-label="Toggle notes sidebar"
+        >
+          <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+          </svg>
+        </button>
+
         <div className="flex-shrink-0">
           <h1 className="text-2xl font-bold text-gray-900">Basalt</h1>
           <p className="text-xs text-gray-600">Your local-first knowledge base</p>
@@ -761,7 +813,7 @@ export default function HomePage(): JSX.Element {
         {/* LEFT SIDEBAR: Folders + Notes */}
         <aside
           data-testid="left-sidebar"
-          className="w-80 bg-white border-r border-gray-300 flex flex-col overflow-hidden"
+          className={`sidebar-mobile ${isLeftSidebarOpen ? 'open' : ''}`}
         >
           {/* Folders Section */}
           <div data-testid="folders-section" className="border-b border-gray-200 p-4 flex-shrink-0 overflow-y-auto max-h-64">
@@ -1001,7 +1053,7 @@ export default function HomePage(): JSX.Element {
         {/* RIGHT SIDEBAR: Metadata */}
         <aside
           data-testid="right-sidebar"
-          className="w-80 bg-white border-l border-gray-300 p-4 overflow-y-auto"
+          className="sidebar-right-mobile w-80 bg-white border-l border-gray-300 p-4 overflow-y-auto"
         >
           <h2 className="text-sm font-bold text-gray-700 uppercase mb-3">Metadata</h2>
 
@@ -1213,6 +1265,82 @@ export default function HomePage(): JSX.Element {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Mobile: Quick Add Dialog */}
+      {isQuickAddOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div
+            data-testid="quick-add-dialog"
+            className="bg-white rounded-lg shadow-xl p-6 max-w-md w-full"
+          >
+            <h2 className="text-xl font-semibold text-gray-900 mb-4">Quick Add Note</h2>
+            <div className="mb-4">
+              <label htmlFor="quick-add-title" className="block text-sm font-medium text-gray-700 mb-2">
+                Note Title
+              </label>
+              <input
+                id="quick-add-title"
+                type="text"
+                data-testid="quick-add-title"
+                value={quickAddTitle}
+                onChange={(e) => setQuickAddTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && quickAddTitle.trim()) {
+                    handleQuickAddSubmit();
+                  } else if (e.key === 'Escape') {
+                    setIsQuickAddOpen(false);
+                    setQuickAddTitle('');
+                  }
+                }}
+                placeholder="Enter note title..."
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-base"
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => {
+                  setIsQuickAddOpen(false);
+                  setQuickAddTitle('');
+                }}
+                className="px-6 py-3 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
+                style={{ minHeight: '44px' }}
+              >
+                Cancel
+              </button>
+              <button
+                data-testid="quick-add-submit"
+                onClick={handleQuickAddSubmit}
+                disabled={!quickAddTitle.trim()}
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ minHeight: '44px' }}
+              >
+                Add Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile: Floating Add Button */}
+      <button
+        data-testid="floating-add-button"
+        onClick={() => setIsQuickAddOpen(true)}
+        className="floating-add-mobile"
+        aria-label="Add new note"
+      >
+        <svg style={{ width: '24px', height: '24px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+        </svg>
+      </button>
+
+      {/* Mobile: Sidebar Overlay */}
+      {isLeftSidebarOpen && (
+        <div
+          className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-20"
+          onClick={() => setIsLeftSidebarOpen(false)}
+        />
       )}
     </div>
   );
