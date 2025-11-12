@@ -171,7 +171,57 @@ test.describe('INTEGRATION: Drag-and-Drop Folder Organization', () => {
         'UPDATE folders SET parent_folder_id = ?, updated_at = ? WHERE name = ?',
         [parentId, new Date().toISOString(), names.child]
       );
+
+      // Trigger leader sync to persist changes to IndexedDB
+      const db = window.__db__;
+      if (db && await db.isLeader()) {
+        await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+        const exportData = await db.exportToFile();
+
+        // Store in IndexedDB backup
+        const dbName = 'basalt-vault-backup';
+        const currentVersion = await new Promise((resolve) => {
+          const checkRequest = indexedDB.open(dbName);
+          checkRequest.onsuccess = (event) => {
+            const db = event.target.result;
+            const version = db.version;
+            db.close();
+            resolve(version);
+          };
+          checkRequest.onerror = () => resolve(0);
+        });
+
+        await new Promise((resolve, reject) => {
+          const request = indexedDB.open(dbName, currentVersion + 1);
+          request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            try {
+              db.createObjectStore('exports');
+            } catch (e) {
+              // Store already exists
+            }
+          };
+          request.onsuccess = (event) => {
+            const db = event.target.result;
+            const transaction = db.transaction(['exports'], 'readwrite');
+            const store = transaction.objectStore('exports');
+            store.put(exportData, 'latest');
+            transaction.oncomplete = () => {
+              db.close();
+              resolve();
+            };
+            transaction.onerror = () => {
+              db.close();
+              reject(transaction.error);
+            };
+          };
+          request.onerror = () => reject(request.error);
+        });
+      }
     }, { parent: parentFolderName, child: childFolderName });
+
+    // Wait for sync to complete
+    await page.waitForTimeout(1000);
 
     await page.reload();
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });

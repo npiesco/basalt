@@ -14,6 +14,7 @@ export default {
   expect: {
     timeout: 10000
   },
+  workers: 1, // Run tests sequentially to avoid IndexedDB corruption
 
   use: {
     headless: true,
