@@ -134,8 +134,12 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
     const backlinkCount = await page.locator('[data-testid="backlink-item"]').count();
     expect(backlinkCount).toBe(2); // note-2 and note-3
 
-    // Verify backlink items show note titles
-    await expect(page.locator('[data-testid="backlink-item"]').first()).toContainText(note2Title);
+    // Verify backlink items show note titles (order doesn't matter - DESC by created_at)
+    const backlinkTexts = await page.locator('[data-testid="backlink-item"]').allTextContents();
+    const hasNote2 = backlinkTexts.some(text => text.includes(note2Title));
+    const hasNote3 = backlinkTexts.some(text => text.includes(note3Title));
+    expect(hasNote2).toBe(true);
+    expect(hasNote3).toBe(true);
 
     console.log('[E2E] ✓✓✓ BACKLINKS PANEL DISPLAYS REFERRING NOTES!');
   });
@@ -302,38 +306,69 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
     await page.locator('[data-testid="new-note-button"]').click();
     await page.waitForTimeout(500);
 
+    const sourceId = await page.evaluate(async (title) => {
+      const result = await window.basaltDb.executeQuery(
+        'SELECT note_id FROM notes WHERE title = ?',
+        [title]
+      );
+      return result.rows[0].values[0].value;
+    }, sourceTitle);
+
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
     await page.waitForTimeout(300);
     await page.locator('[data-testid="note-body-textarea"]').fill(`Links to [[${targetId}]]`);
     await page.locator('[data-testid="save-note-button"]').click();
     await page.waitForTimeout(500);
 
-    // Verify backlink exists
-    const backlinksBeforeDelete = await page.evaluate(async () => {
+    // Check if foreign keys are enabled
+    const fkEnabled = await page.evaluate(async () => {
+      const result = await window.basaltDb.executeQuery('PRAGMA foreign_keys', []);
+      return result.rows[0]?.values[0]?.value;
+    });
+    console.log('[E2E] Foreign keys enabled:', fkEnabled);
+
+    // Verify backlink exists for this specific note
+    const backlinksBeforeDelete = await page.evaluate(async (srcId) => {
       const result = await window.basaltDb.executeQuery(
-        'SELECT COUNT(*) as count FROM backlinks',
-        []
+        'SELECT COUNT(*) as count FROM backlinks WHERE source_note_id = ?',
+        [srcId]
       );
       return result.rows[0].values[0].value;
-    });
+    }, sourceId);
+    console.log('[E2E] Backlinks before delete:', backlinksBeforeDelete);
     expect(backlinksBeforeDelete).toBeGreaterThan(0);
 
     // Delete source note
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
     await page.waitForTimeout(300);
 
-    page.once('dialog', dialog => dialog.accept());
+    // Click delete button to open confirmation dialog
     await page.locator('[data-testid="delete-note-button"]').first().click();
+    await page.waitForTimeout(300);
+
+    // Click confirm button in the React confirmation dialog
+    await page.locator('[data-testid="confirm-delete-button"]').click();
     await page.waitForTimeout(500);
 
-    // Verify backlinks are CASCADE deleted
-    const backlinksAfterDelete = await page.evaluate(async () => {
+    // Verify note was actually deleted
+    const noteExists = await page.evaluate(async (srcId) => {
       const result = await window.basaltDb.executeQuery(
-        'SELECT COUNT(*) as count FROM backlinks',
-        []
+        'SELECT COUNT(*) as count FROM notes WHERE note_id = ?',
+        [srcId]
       );
       return result.rows[0].values[0].value;
-    });
+    }, sourceId);
+    console.log('[E2E] Note exists after delete:', noteExists);
+
+    // Verify backlinks for deleted note are CASCADE deleted
+    const backlinksAfterDelete = await page.evaluate(async (srcId) => {
+      const result = await window.basaltDb.executeQuery(
+        'SELECT COUNT(*) as count FROM backlinks WHERE source_note_id = ?',
+        [srcId]
+      );
+      return result.rows[0].values[0].value;
+    }, sourceId);
+    console.log('[E2E] Backlinks after delete:', backlinksAfterDelete);
     expect(backlinksAfterDelete).toBe(0);
 
     console.log('[E2E] ✓✓✓ BACKLINK CASCADE DELETE WORKS!');
