@@ -4,7 +4,7 @@
  * Captures all browser console output to diagnose VFS/IndexedDB issues
  */
 
-import { test, expect } from '@playwright/test';
+const { test, expect } = require('@playwright/test');
 
 test.describe('Browser Console Logging', () => {
   test('Capture console during database operations', async ({ page }) => {
@@ -88,7 +88,7 @@ test.describe('Browser Console Logging', () => {
       return result.rows.length > 0;
     }, testTitle);
 
-    console.log(`\n🔍 Note persisted: ${noteExists ? '✅ YES' : '❌ NO'}\n');
+    console.log('\n[CHECK] Note persisted: ' + (noteExists ? 'YES' : 'NO') + '\n');
 
     // Print any new errors after reload
     if (consoleErrors.length > 0) {

@@ -40,6 +40,8 @@ export default {
       name: 'chromium',
       use: {
         browserName: 'chromium',
+        hasTouch: true,
+        isMobile: true,
       },
     },
   ],

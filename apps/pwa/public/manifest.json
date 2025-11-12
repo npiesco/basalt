@@ -1,0 +1,33 @@
+{
+  "name": "Basalt - Local-First Knowledge Base",
+  "short_name": "Basalt",
+  "description": "AbsurderSQL-powered Obsidian rebuild with offline-first architecture",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "New Note",
+      "url": "/",
+      "description": "Create a new note"
+    }
+  ]
+}
