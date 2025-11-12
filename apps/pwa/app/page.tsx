@@ -21,10 +21,10 @@ interface Folder {
 }
 
 interface Backlink {
-  backlink_id: string;
   source_note_id: string;
   target_note_id: string;
   source_note_title?: string;
+  context_snippet?: string;
   created_at: string;
 }
 
@@ -533,9 +533,9 @@ export default function HomePage(): JSX.Element {
       const result = await executeQuery(
         database,
         `SELECT
-          b.backlink_id,
           b.source_note_id,
           b.target_note_id,
+          b.context_snippet,
           b.created_at,
           n.title as source_note_title
         FROM backlinks b
@@ -1028,31 +1028,60 @@ export default function HomePage(): JSX.Element {
       const { extractWikiLinks } = await import('../../../packages/domain/src/markdown.js');
       const now = new Date().toISOString();
 
+      console.log('[PWA-BACKLINKS] ===== STARTING NOTE SAVE WITH BACKLINKS =====');
+      console.log('[PWA-BACKLINKS] Note ID:', selectedNoteId);
+      console.log('[PWA-BACKLINKS] Note body:', editBody?.substring(0, 100));
+
       // Update note
       const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
       const updateParams = [editTitle, editBody, now, selectedNoteId];
 
       await executeQuery(db, updateSql, updateParams);
+      console.log('[PWA-BACKLINKS] ✓ Note updated');
 
       // Parse wikilinks from note body
       const wikilinks = extractWikiLinks(editBody || '');
-      console.log('[PWA] Extracted wikilinks:', wikilinks);
+      console.log('[PWA-BACKLINKS] Extracted wikilinks:', wikilinks);
+      console.log('[PWA-BACKLINKS] Wikilinks count:', wikilinks.length);
+
+      // Check if foreign keys are enabled
+      const fkCheckResult = await executeQuery(db, 'PRAGMA foreign_keys', []);
+      console.log('[PWA-BACKLINKS] Foreign keys enabled:', fkCheckResult.rows[0]?.values[0]?.value);
 
       // Delete old backlinks for this note
-      await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+      console.log('[PWA-BACKLINKS] Deleting old backlinks for:', selectedNoteId);
+      const deleteResult = await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+      console.log('[PWA-BACKLINKS] ✓ Deleted old backlinks');
 
       // Insert new backlinks
       for (const targetNoteId of wikilinks) {
-        const backlinkId = `backlink_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        await executeQuery(
-          db,
-          'INSERT INTO backlinks (backlink_id, source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?, ?)',
-          [backlinkId, selectedNoteId, targetNoteId, '', now]
-        );
-        console.log('[PWA] Created backlink:', selectedNoteId, '→', targetNoteId);
+        console.log('[PWA-BACKLINKS] Attempting to insert backlink:', selectedNoteId, '→', targetNoteId);
+
+        try {
+          await executeQuery(
+            db,
+            'INSERT OR REPLACE INTO backlinks (source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?)',
+            [selectedNoteId, targetNoteId, '', now]
+          );
+          console.log('[PWA-BACKLINKS] ✓ Created backlink:', selectedNoteId, '→', targetNoteId);
+        } catch (insertErr) {
+          console.error('[PWA-BACKLINKS] ✗ Failed to insert backlink:', insertErr);
+          console.error('[PWA-BACKLINKS] Insert params:', { selectedNoteId, targetNoteId, now });
+        }
       }
 
+      // Verify backlinks were created
+      const verifyResult = await executeQuery(
+        db,
+        'SELECT COUNT(*) as count FROM backlinks WHERE source_note_id = ?',
+        [selectedNoteId]
+      );
+      const backlinkCount = verifyResult.rows[0]?.values[0]?.value || 0;
+      console.log('[PWA-BACKLINKS] Backlinks in DB after insert:', backlinkCount);
+
       await syncIfLeader(db);
+      console.log('[PWA-BACKLINKS] ✓ Synced to IndexedDB (if leader)');
+
       setError(null);
       await loadNotes(db);
 
@@ -1060,6 +1089,8 @@ export default function HomePage(): JSX.Element {
       if (selectedNoteId) {
         await loadBacklinks(db, selectedNoteId);
       }
+
+      console.log('[PWA-BACKLINKS] ===== SAVE COMPLETE =====');
 
       // Notify other tabs with the SQL to execute
       broadcastDataChange(updateSql, updateParams, 'update-note');
@@ -2120,7 +2151,7 @@ export default function HomePage(): JSX.Element {
               <div className="space-y-2">
                 {backlinks.map((backlink) => (
                   <div
-                    key={backlink.backlink_id}
+                    key={`${backlink.source_note_id}-${backlink.target_note_id}`}
                     data-testid="backlink-item"
                     onClick={() => handleBacklinkClick(backlink)}
                     className="p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors border border-gray-200"

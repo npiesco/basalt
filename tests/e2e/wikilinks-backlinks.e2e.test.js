@@ -323,7 +323,7 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
     await page.waitForTimeout(300);
 
     page.once('dialog', dialog => dialog.accept());
-    await page.locator('[data-testid="delete-note-button"]').click();
+    await page.locator('[data-testid="delete-note-button"]').first().click();
     await page.waitForTimeout(500);
 
     // Verify backlinks are CASCADE deleted
