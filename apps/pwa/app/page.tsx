@@ -49,6 +49,7 @@ export default function HomePage(): JSX.Element {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit'); // Start in edit mode, switch to preview after save
 
   // Folder management state
   const [newFolderName, setNewFolderName] = useState('');
@@ -1084,6 +1085,7 @@ export default function HomePage(): JSX.Element {
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
+    setViewMode('edit'); // Start in edit mode when selecting a note
 
     // Load tags for this note
     if (db) {
@@ -1110,6 +1112,94 @@ export default function HomePage(): JSX.Element {
   function handleClearTagFilter() {
     setFilterTagLabel(null);
     console.log('[PWA] Cleared tag filter');
+  }
+
+  async function handleWikilinkClick(targetNoteId: string) {
+    console.log('[PWA-WIKILINK] Clicked wikilink, navigating to:', targetNoteId);
+
+    if (!db) {
+      console.error('[PWA-WIKILINK] Database not initialized');
+      return;
+    }
+
+    // Find the note in our notes array
+    const targetNote = notes.find(n => n.note_id === targetNoteId);
+
+    if (targetNote) {
+      console.log('[PWA-WIKILINK] Found target note:', targetNote.title);
+      handleSelectNote(targetNote); // Pass the Note object, not just the ID
+    } else {
+      console.warn('[PWA-WIKILINK] Target note not found:', targetNoteId);
+    }
+  }
+
+  function renderNotePreview(body: string) {
+    if (!body) {
+      return <p className="text-gray-400 italic">No content</p>;
+    }
+
+    // Parse wikilinks using regex: [[note_id]]
+    const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    console.log('[PWA-WIKILINK] Rendering preview for body:', body.substring(0, 100));
+
+    while ((match = WIKILINK_PATTERN.exec(body)) !== null) {
+      // Add text before the wikilink
+      if (match.index > lastIndex) {
+        parts.push(body.substring(lastIndex, match.index));
+      }
+
+      const targetNoteId = match[1].trim();
+      console.log('[PWA-WIKILINK] Found wikilink to:', targetNoteId);
+
+      // Look up the note to get its title
+      const targetNote = notes.find(n => n.note_id === targetNoteId);
+
+      if (targetNote) {
+        // Valid wikilink - render as clickable link
+        parts.push(
+          <span
+            key={`wikilink-${match.index}`}
+            data-testid="wikilink"
+            onClick={() => handleWikilinkClick(targetNoteId)}
+            className="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer font-medium"
+          >
+            {targetNote.title}
+          </span>
+        );
+        console.log('[PWA-WIKILINK] Rendered valid wikilink:', targetNote.title);
+      } else {
+        // Broken wikilink - render with red styling
+        parts.push(
+          <span
+            key={`wikilink-broken-${match.index}`}
+            data-testid="wikilink-broken"
+            className="inline-flex items-center px-2 py-0.5 rounded bg-red-50 text-red-600 cursor-not-allowed font-medium border border-red-200"
+          >
+            {targetNoteId}
+          </span>
+        );
+        console.log('[PWA-WIKILINK] Rendered broken wikilink:', targetNoteId);
+      }
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text after last wikilink
+    if (lastIndex < body.length) {
+      parts.push(body.substring(lastIndex));
+    }
+
+    console.log('[PWA-WIKILINK] Rendered', parts.length, 'parts');
+
+    return (
+      <div className="whitespace-pre-wrap font-mono text-sm">
+        {parts.length > 0 ? parts : body}
+      </div>
+    );
   }
 
   async function handleSaveEdit() {
@@ -1251,6 +1341,10 @@ export default function HomePage(): JSX.Element {
       }
 
       console.log('[PWA-BACKLINKS] ===== SAVE COMPLETE =====');
+
+      // Switch to preview mode to show rendered wikilinks
+      setViewMode('preview');
+      console.log('[PWA-WIKILINK] Switched to preview mode after save');
 
       // Notify other tabs with the SQL to execute
       broadcastDataChange(updateSql, updateParams, 'update-note');
@@ -2229,20 +2323,56 @@ export default function HomePage(): JSX.Element {
                     <span data-testid="note-title-display" className="hidden">{editTitle}</span>
                   </div>
 
-                  {/* Body Textarea */}
+                  {/* Body Edit/Preview Section */}
                   <div>
-                    <label htmlFor="edit-body" className="block text-sm font-medium text-gray-700 mb-2">
-                      Content
-                    </label>
-                    <textarea
-                      id="edit-body"
-                      data-testid="note-body-textarea"
-                      value={editBody}
-                      onChange={(e) => setEditBody(e.target.value)}
-                      rows={20}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                      placeholder="Write your note content here..."
-                    />
+                    <div className="flex items-center justify-between mb-2">
+                      <label htmlFor="edit-body" className="block text-sm font-medium text-gray-700">
+                        Content
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          data-testid="toggle-edit-mode"
+                          onClick={() => setViewMode('edit')}
+                          className={`px-3 py-1 text-xs font-medium rounded ${
+                            viewMode === 'edit'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          data-testid="toggle-preview-mode"
+                          onClick={() => setViewMode('preview')}
+                          className={`px-3 py-1 text-xs font-medium rounded ${
+                            viewMode === 'preview'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          Preview
+                        </button>
+                      </div>
+                    </div>
+
+                    {viewMode === 'edit' ? (
+                      <textarea
+                        id="edit-body"
+                        data-testid="note-body-textarea"
+                        value={editBody}
+                        onChange={(e) => setEditBody(e.target.value)}
+                        rows={20}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                        placeholder="Write your note content here..."
+                      />
+                    ) : (
+                      <div
+                        data-testid="note-preview"
+                        className="w-full min-h-[480px] px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+                      >
+                        {renderNotePreview(editBody)}
+                      </div>
+                    )}
                   </div>
 
                   {/* Tags Input */}
@@ -2293,6 +2423,7 @@ export default function HomePage(): JSX.Element {
                         setEditBody('');
                         setEditTags('');
                         setNoteTags([]);
+                        setViewMode('preview');
                       }}
                       className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
                     >
