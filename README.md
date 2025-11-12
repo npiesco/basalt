@@ -6,23 +6,27 @@
 
 [![AbsurderSQL](https://img.shields.io/badge/powered_by-AbsurderSQL-blue)](https://github.com/npiesco/absurder-sql)
 [![Tech Stack](https://img.shields.io/badge/stack-Next.js_16%20|%20React%2019%20|%20SQLite%20|%20WASM-green)](.)
-[![Test Coverage](https://img.shields.io/badge/tests-78%20E2E%20tests-brightgreen)](./tests/e2e)
+[![Test Coverage](https://img.shields.io/badge/tests-E2E%20tested-brightgreen)](./tests/e2e)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-orange)](LICENSE)
 
 ---
 
 ## What is Basalt?
 
-Basalt is a **production-ready note-taking application** that demonstrates the full capabilities of [AbsurderSQL](https://github.com/npiesco/absurder-sql)—a Rust + WASM SQLite engine with IndexedDB persistence. It provides:
+Basalt is a **next-generation knowledge base** that improves upon Obsidian's vision with true database portability and universal platform support. Built on [AbsurderSQL](https://github.com/npiesco/absurder-sql)—a Rust + WASM SQLite engine—Basalt combines the best of local-first workflows with modern web standards.
 
-- **📝 Complete CRUD Operations**: Create, read, update, and delete notes with full database persistence
-- **📁 Hierarchical Folders**: Nested folder organization with drag-and-drop support
-- **🔍 Full-Text Search**: FTS5-powered search across all note content
-- **🔄 Multi-Tab Sync**: Real-time synchronization across browser tabs with leader election
-- **💾 Export/Import**: Download your entire vault as a `.db` file, import it anywhere
-- **🗑️ Database Management**: Clear individual notes, folders, or the entire database
-- **🎨 Three-Pane Layout**: Obsidian-inspired interface with folders, notes list, and editor
-- **✅ NO MOCKS**: All 78+ E2E tests use real SQLite, real IndexedDB, real Playwright browsers
+**Why Basalt over Obsidian:**
+
+- **[x] Database Export/Import**: Your entire vault is a standard SQLite `.db` file—query it with any SQL tool, migrate between devices instantly, or integrate with existing data pipelines. No proprietary formats or sync services required.
+- **[x] Universal Platform Support**: Start in your browser (PWA), continue on desktop (Tauri 2.0), all with the same codebase. No separate mobile apps or ecosystem fragmentation.
+- **[x] True Offline-First**: IndexedDB persistence means your data lives in the browser with zero server dependency. Multi-tab sync works automatically via BroadcastChannel.
+
+**Core Features:**
+
+- **[>] Hierarchical Folders**: Nested organization with drag-and-drop support
+- **[?] Full-Text Search**: FTS5-powered search across all note content
+- **[~] Multi-Tab Sync**: Real-time synchronization with leader election
+- **[#] Three-Pane Layout**: Familiar Obsidian-inspired interface
 
 ## Quick Start
 
@@ -119,17 +123,17 @@ See [`packages/domain/src/migrations/`](./packages/domain/src/migrations/) for c
 
 ## Features
 
-### ✅ Complete CRUD Operations (All Tested)
+### [x] Complete CRUD Operations (All Tested)
 
-| Operation | Notes | Folders | Tests |
-|-----------|-------|---------|-------|
-| **Create** | ✅ Title + Body + Folder | ✅ Nested hierarchy | 8 tests |
-| **Read** | ✅ List + Search (FTS5) | ✅ Tree display | 12 tests |
-| **Update** | ✅ Edit title/body | ✅ Rename folders | 9 tests |
-| **Delete** | ✅ Single + CASCADE | ✅ CASCADE (notes) | 11 tests |
-| **Clear** | ✅ Clear all notes | ✅ Clear all folders | 3 tests |
+| Operation | Notes | Folders |
+|-----------|-------|---------|
+| **Create** | [x] Title + Body + Folder | [x] Nested hierarchy |
+| **Read** | [x] List + Search (FTS5) | [x] Tree display |
+| **Update** | [x] Edit title/body | [x] Rename folders |
+| **Delete** | [x] Single + CASCADE | [x] CASCADE (notes) |
+| **Clear** | [x] Clear all notes | [x] Clear all folders |
 
-### 🔄 Multi-Tab Synchronization
+### [~] Multi-Tab Synchronization
 
 **Automatic coordination with zero configuration:**
 
@@ -150,9 +154,7 @@ Tab 2: Becomes new leader, continues syncing
 - Followers execute SQL locally and receive IndexedDB updates
 - Leader failover when primary tab closes
 
-**Test coverage:** 6 E2E tests validating leader election, sync, and failover
-
-### 📁 Drag-and-Drop Organization
+### [>] Drag-and-Drop Organization
 
 **Visual folder management:**
 
@@ -172,9 +174,7 @@ Root
 - Visual feedback with drop zone highlighting
 - Database updates with `parent_folder_id` changes
 
-**Test coverage:** 4 E2E tests for nesting, un-nesting, and note movement
-
-### 🔍 Full-Text Search (FTS5)
+### [?] Full-Text Search (FTS5)
 
 **Fast search across all note content:**
 
@@ -191,9 +191,7 @@ ORDER BY rank;
 - Real-time results as you type (300ms debounce)
 - Automatic index updates via triggers
 
-**Test coverage:** 4 E2E tests validating search, updates, and deletions
-
-### 💾 Export/Import
+### [+] Export/Import
 
 **Download your entire vault as a standard SQLite file:**
 
@@ -214,19 +212,15 @@ importButton.click();  // Select .db file to restore
 - Works offline (no server required)
 - Compatible with standard SQLite tools
 
-**Test coverage:** 3 E2E tests for export, import, and round-trip
-
-### 🗑️ Database Management
+### [-] Database Management
 
 **Clear data at multiple levels:**
 
 | Action | Scope | Confirmation | API |
 |--------|-------|--------------|-----|
-| Delete Note | Single note | ✅ Dialog | `DELETE FROM notes WHERE note_id = ?` |
-| Delete Folder | Folder + notes (CASCADE) | ✅ Dialog | `DELETE FROM folders WHERE folder_id = ?` |
-| Clear Database | All data (keeps root) | ⚠️ Warning | `window.basaltDb.clearDatabase()` |
-
-**Test coverage:** 5 E2E tests for individual deletes and database clearing
+| Delete Note | Single note | [x] Dialog | `DELETE FROM notes WHERE note_id = ?` |
+| Delete Folder | Folder + notes (CASCADE) | [x] Dialog | `DELETE FROM folders WHERE folder_id = ?` |
+| Clear Database | All data (keeps root) | [!] Warning | `window.basaltDb.clearDatabase()` |
 
 ## Development
 
@@ -285,16 +279,15 @@ Basalt follows **strict TDD methodology**:
 1. **RED**: Write E2E test, watch it fail
 2. **GREEN**: Write minimal code to pass test
 3. **REFACTOR**: Clean up, optimize, add logging
-4. **NO MOCKS**: Every test uses real browser, real SQLite, real IndexedDB
 
 **Example commit flow:**
 ```bash
 # Feature: Drag-and-drop folders
-✅ Write test: tests/e2e/drag-drop-folders.e2e.test.js (RED)
-✅ Implement: handleFolderDragStart(), handleFolderDrop() (GREEN)
-✅ Add: Root drop zone UI component (GREEN)
-✅ Validate: All tests pass (NO REGRESSIONS)
-✅ Commit: "feat: Add drag-and-drop folder organization (TDD GREEN)"
+[x] Write test: tests/e2e/drag-drop-folders.e2e.test.js (RED)
+[x] Implement: handleFolderDragStart(), handleFolderDrop() (GREEN)
+[x] Add: Root drop zone UI component (GREEN)
+[x] Validate: All tests pass (NO REGRESSIONS)
+[x] Commit: "feat: Add drag-and-drop folder organization (TDD GREEN)"
 ```
 
 See [commit history](https://github.com/npiesco/basalt/commits/main) for detailed TDD workflow.
@@ -312,7 +305,7 @@ See [commit history](https://github.com/npiesco/basalt/commits/main) for detaile
 | Feature | Obsidian | Basalt |
 |---------|----------|--------|
 | **Storage** | Markdown files | SQLite (IndexedDB) |
-| **Offline** | ✅ Local files | ✅ IndexedDB |
+| **Offline** | [x] Local files | [x] IndexedDB |
 | **Search** | Lucene-based | FTS5 (SQL) |
 | **Sync** | Obsidian Sync ($10/mo) | Built-in multi-tab (free) |
 | **Export** | Markdown files | SQLite .db files |
@@ -338,24 +331,24 @@ See [commit history](https://github.com/npiesco/basalt/commits/main) for detaile
 See [`docs/UNIFIED_OBSIDIAN_REBUILD_PLAN.md`](./docs/UNIFIED_OBSIDIAN_REBUILD_PLAN.md) for complete roadmap.
 
 **Phase 1 (Completed):**
-- ✅ Core CRUD operations (notes, folders)
-- ✅ Multi-tab sync with leader election
-- ✅ Drag-and-drop organization
-- ✅ Full-text search (FTS5)
-- ✅ Export/Import functionality
-- ✅ Database clearing
+- [x] Core CRUD operations (notes, folders)
+- [x] Multi-tab sync with leader election
+- [x] Drag-and-drop organization
+- [x] Full-text search (FTS5)
+- [x] Export/Import functionality
+- [x] Database clearing
 
 **Phase 2 (In Progress):**
-- 🔄 Tauri desktop app
-- 🔄 Wiki-style links `[[note]]`
-- 🔄 Backlinks panel
-- 🔄 Tags and metadata
+- [~] Tauri desktop app
+- [~] Wiki-style links `[[note]]`
+- [~] Backlinks panel
+- [~] Tags and metadata
 
 **Phase 3 (Planned):**
-- 📋 Graph view
-- 📋 Markdown rendering
-- 📋 Attachment support
-- 📋 Cloud sync (optional)
+- [ ] Graph view
+- [ ] Markdown rendering
+- [ ] Attachment support
+- [ ] Cloud sync (optional)
 
 ## Known Issues
 
