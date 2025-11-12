@@ -86,13 +86,13 @@ test.describe('INTEGRATION: Tags and Metadata', () => {
     await page.locator('[data-testid="save-note-button"]').click();
     await page.waitForTimeout(1000);
 
-    // Deselect the note (click empty area or another note)
-    await page.locator('[data-testid="note-list"]').click();
-    await page.waitForTimeout(300);
-
-    // Verify tags are shown in the note list item
+    // Verify tags are shown in the note list item (tags appear even when note is selected)
     const noteItem = page.locator(`[data-testid="note-item"]:has-text("${noteTitle}")`);
     await expect(noteItem.locator('[data-testid="note-tag-badge"]')).toHaveCount(2);
+
+    // Verify the specific tags are present
+    await expect(noteItem.locator('[data-testid="note-tag-badge"]:has-text("react")')).toBeVisible();
+    await expect(noteItem.locator('[data-testid="note-tag-badge"]:has-text("frontend")')).toBeVisible();
 
     console.log('[E2E] ✓✓✓ TAGS DISPLAYED IN NOTE LIST!');
   });

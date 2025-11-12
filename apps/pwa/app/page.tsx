@@ -10,6 +10,7 @@ interface Note {
   folder_id: string | null;
   created_at: string;
   updated_at: string;
+  tags?: Tag[];
 }
 
 interface Folder {
@@ -496,6 +497,36 @@ export default function HomePage(): JSX.Element {
           note[col] = value.type === 'Null' ? null : value.value;
         });
         return note as Note;
+      });
+
+      // Load tags for all notes
+      const tagsResult = await executeQuery(
+        database,
+        `SELECT nt.note_id, t.tag_id, t.label, t.created_at
+         FROM note_tags nt
+         JOIN tags t ON nt.tag_id = t.tag_id
+         ORDER BY t.label ASC`,
+        []
+      );
+
+      // Group tags by note_id
+      const tagsByNoteId: Record<string, Tag[]> = {};
+      tagsResult.rows.forEach((row: any) => {
+        const noteId = row.values[0].value;
+        const tag: Tag = {
+          tag_id: row.values[1].value,
+          label: row.values[2].value,
+          created_at: row.values[3].value
+        };
+        if (!tagsByNoteId[noteId]) {
+          tagsByNoteId[noteId] = [];
+        }
+        tagsByNoteId[noteId].push(tag);
+      });
+
+      // Attach tags to notes
+      noteList.forEach(note => {
+        note.tags = tagsByNoteId[note.note_id] || [];
       });
 
       setNotes(noteList);
@@ -1069,6 +1100,16 @@ export default function HomePage(): JSX.Element {
     } else {
       console.warn('[PWA] Source note not found for backlink:', backlink.source_note_id);
     }
+  }
+
+  function handleTagFilterClick(tagLabel: string) {
+    setFilterTagLabel(tagLabel);
+    console.log('[PWA] Filtering notes by tag:', tagLabel);
+  }
+
+  function handleClearTagFilter() {
+    setFilterTagLabel(null);
+    console.log('[PWA] Cleared tag filter');
   }
 
   async function handleSaveEdit() {
@@ -1733,6 +1774,11 @@ export default function HomePage(): JSX.Element {
 
   const selectedNote = notes.find(n => n.note_id === selectedNoteId);
 
+  // Filter notes by tag if a filter is active
+  const displayedNotes = filterTagLabel
+    ? notes.filter(note => note.tags?.some(tag => tag.label === filterTagLabel))
+    : notes;
+
   return (
     <div
       className="min-h-screen bg-gray-100 flex flex-col"
@@ -2053,12 +2099,30 @@ export default function HomePage(): JSX.Element {
               </div>
             </div>
 
+            {/* Tag Filter Badge */}
+            {filterTagLabel && (
+              <div className="mb-2 flex items-center gap-2 p-2 bg-purple-50 rounded border border-purple-200">
+                <span className="text-xs font-medium text-purple-800">
+                  Filtering by: {filterTagLabel}
+                </span>
+                <button
+                  data-testid="clear-tag-filter"
+                  onClick={handleClearTagFilter}
+                  className="ml-auto px-2 py-0.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+
             {/* Notes List */}
-            {notes.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-4">No notes yet</p>
+            {displayedNotes.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">
+                {filterTagLabel ? 'No notes with this tag' : 'No notes yet'}
+              </p>
             ) : (
               <div className="space-y-1">
-                {notes.map((note) => (
+                {displayedNotes.map((note) => (
                   <div
                     key={note.note_id}
                     data-testid="note-item"
@@ -2091,6 +2155,24 @@ export default function HomePage(): JSX.Element {
                       <p className="text-xs text-gray-600 mt-1 line-clamp-2">
                         {note.body}
                       </p>
+                    )}
+                    {/* Tag badges */}
+                    {note.tags && note.tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {note.tags.map((tag) => (
+                          <span
+                            key={tag.tag_id}
+                            data-testid="note-tag-badge"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTagFilterClick(tag.label);
+                            }}
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 cursor-pointer"
+                          >
+                            {tag.label}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     <button
                       data-testid="delete-note-button"
@@ -2184,7 +2266,8 @@ export default function HomePage(): JSX.Element {
                           <span
                             key={tag.tag_id}
                             data-testid="note-tag"
-                            className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
+                            onClick={() => handleTagFilterClick(tag.label)}
+                            className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer"
                           >
                             {tag.label}
                           </span>
