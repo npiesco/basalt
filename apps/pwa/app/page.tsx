@@ -223,6 +223,71 @@ export default function HomePage(): JSX.Element {
           (window as any).basaltDb = {
             executeQuery: async (sql: string, params: any[]) => {
               return executeQuery(database, sql, params);
+            },
+            // Expose clear database for testing
+            clearDatabase: async () => {
+              // Enable writes if needed
+              const isLeader = await database.isLeader();
+              if (!isLeader && typeof database.allowNonLeaderWrites === 'function') {
+                await database.allowNonLeaderWrites(true);
+              }
+
+              // Delete all data from tables (in reverse order of dependencies)
+              await executeQuery(database, 'DELETE FROM note_tags', []);
+              await executeQuery(database, 'DELETE FROM tags', []);
+              await executeQuery(database, 'DELETE FROM backlinks', []);
+              await executeQuery(database, 'DELETE FROM attachments', []);
+              await executeQuery(database, 'DELETE FROM notes', []);
+              await executeQuery(database, 'DELETE FROM folders WHERE folder_id != ?', ['root']);
+              console.log('[TEST] Database cleared');
+
+              // Persist to IndexedDB if leader
+              if (await database.isLeader()) {
+                await database.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+                const exportData = await database.exportToFile();
+
+                // Store in IndexedDB backup
+                const dbName = 'basalt-vault-backup';
+                const currentVersion = await new Promise((resolve) => {
+                  const checkRequest = indexedDB.open(dbName);
+                  checkRequest.onsuccess = (event) => {
+                    const db = event.target.result;
+                    const version = db.version;
+                    db.close();
+                    resolve(version);
+                  };
+                  checkRequest.onerror = () => resolve(0);
+                });
+
+                await new Promise((resolve, reject) => {
+                  const request = indexedDB.open(dbName, currentVersion + 1);
+                  request.onupgradeneeded = (event) => {
+                    const db = event.target.result;
+                    try {
+                      db.createObjectStore('exports');
+                    } catch (e) {
+                      // Store already exists
+                    }
+                  };
+                  request.onsuccess = (event) => {
+                    const db = event.target.result;
+                    const transaction = db.transaction(['exports'], 'readwrite');
+                    const store = transaction.objectStore('exports');
+                    store.put(exportData, 'latest');
+                    transaction.oncomplete = () => {
+                      db.close();
+                      resolve();
+                    };
+                    transaction.onerror = () => {
+                      db.close();
+                      reject(transaction.error);
+                    };
+                  };
+                  request.onerror = () => reject(request.error);
+                });
+
+                console.log('[TEST] Database cleared and persisted to IndexedDB');
+              }
             }
           };
           (window as any).Database = absurderSql.Database;
@@ -1139,6 +1204,50 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  // Clear/Reset Database
+  async function handleClearDatabase() {
+    if (!db) return;
+
+    console.log('[PWA] Starting database clear...');
+
+    try {
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      // Delete all data from tables (in reverse order of dependencies)
+      await executeQuery(db, 'DELETE FROM note_tags', []);
+      await executeQuery(db, 'DELETE FROM tags', []);
+      await executeQuery(db, 'DELETE FROM backlinks', []);
+      await executeQuery(db, 'DELETE FROM attachments', []);
+      await executeQuery(db, 'DELETE FROM notes', []);
+      await executeQuery(db, 'DELETE FROM folders WHERE folder_id != ?', ['root']);
+
+      console.log('[PWA] All data deleted');
+
+      await syncIfLeader(db);
+
+      // Reload data
+      await loadNotes(db);
+      await loadFolders(db);
+
+      // Clear UI state
+      setSelectedNoteId(null);
+      setEditTitle('');
+      setEditBody('');
+      setSearchQuery('');
+      setSearchResults([]);
+      setError(null);
+
+      console.log('[PWA] ✓ Database cleared successfully');
+
+      // Broadcast to other tabs
+      broadcastDataChange(undefined, undefined, 'clear-database');
+    } catch (err) {
+      console.error('[PWA] Clear database failed:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   // Mobile: Quick add note
   async function handleQuickAddSubmit() {
     if (!db || !quickAddTitle.trim()) {
@@ -1478,7 +1587,7 @@ export default function HomePage(): JSX.Element {
           )}
         </div>
 
-        {/* Export/Import Buttons */}
+        {/* Export/Import/Clear Buttons */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {/* Export Button */}
           <button
@@ -1516,6 +1625,21 @@ export default function HomePage(): JSX.Element {
                 ⬆️ Import
               </>
             )}
+          </button>
+
+          {/* Clear Database Button */}
+          <button
+            data-testid="clear-database-button"
+            onClick={() => {
+              if (window.confirm('⚠️ WARNING: This will delete ALL notes and folders!\n\nThis action cannot be undone. Are you sure?')) {
+                handleClearDatabase();
+              }
+            }}
+            disabled={!db}
+            className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            title="Clear all data from database"
+          >
+            🗑️ Clear
           </button>
 
           {/* Hidden File Input */}
