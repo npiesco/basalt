@@ -676,6 +676,63 @@ export default function HomePage(): JSX.Element {
 
   // ===== DRAG-AND-DROP HANDLERS =====
 
+  // Root drop zone handlers for un-nesting
+  function handleRootDropZoneDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId('root-drop-zone');
+  }
+
+  function handleRootDropZoneDragLeave(e: React.DragEvent<HTMLDivElement>) {
+    setDragOverFolderId(null);
+  }
+
+  async function handleRootDropZoneDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOverFolderId(null);
+
+    if (!db) return;
+
+    try {
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const now = new Date().toISOString();
+
+      if (draggedFolder) {
+        // Move folder to root level
+        const updateSql = 'UPDATE folders SET parent_folder_id = ?, updated_at = ? WHERE folder_id = ?';
+        const updateParams = ['root', now, draggedFolder.folder_id];
+
+        await executeQuery(db, updateSql, updateParams);
+        console.log('[PWA] Folder moved to root:', draggedFolder.name);
+
+        await syncIfLeader(db);
+        await loadFolders(db);
+        setDraggedFolder(null);
+
+        // Notify other tabs
+        broadcastDataChange(updateSql, updateParams, 'drag-drop-folder-to-root');
+      } else if (draggedNote) {
+        // Move note to root folder
+        const updateSql = 'UPDATE notes SET folder_id = ?, updated_at = ? WHERE note_id = ?';
+        const updateParams = ['root', now, draggedNote.note_id];
+
+        await executeQuery(db, updateSql, updateParams);
+        console.log('[PWA] Note moved to root folder:', draggedNote.title);
+
+        await syncIfLeader(db);
+        await loadNotes(db);
+        setDraggedNote(null);
+
+        // Notify other tabs
+        broadcastDataChange(updateSql, updateParams, 'drag-drop-note-to-root');
+      }
+    } catch (err) {
+      console.error('[PWA] Failed to drop on root zone:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
   function handleFolderDragStart(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
     setDraggedFolder(folder);
     e.dataTransfer.effectAllowed = 'move';
@@ -1513,6 +1570,21 @@ export default function HomePage(): JSX.Element {
               >
                 +
               </button>
+            </div>
+
+            {/* Root Drop Zone (for un-nesting folders/notes) */}
+            <div
+              data-testid="root-drop-zone"
+              onDragOver={handleRootDropZoneDragOver}
+              onDragLeave={handleRootDropZoneDragLeave}
+              onDrop={handleRootDropZoneDrop}
+              className={`px-3 py-2 mb-2 border-2 border-dashed rounded text-xs text-center transition-colors ${
+                dragOverFolderId === 'root-drop-zone'
+                  ? 'border-blue-500 bg-blue-50 text-blue-700'
+                  : 'border-gray-300 text-gray-500'
+              }`}
+            >
+              {dragOverFolderId === 'root-drop-zone' ? '⬇️ Drop here to move to root' : '📁 Root Level'}
             </div>
 
             {/* Folder List */}
