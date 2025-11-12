@@ -83,10 +83,13 @@ export default function HomePage(): JSX.Element {
         setDb(database);
         dbRef.current = database;
 
-        // Expose database to window for E2E testing
+        // Expose database to window for E2E testing and multi-tab sync
         if (typeof window !== 'undefined') {
           const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
           const absurderSql = await import('@npiesco/absurder-sql');
+
+          // Expose database instance for leader election testing
+          (window as any).__db__ = database;
 
           (window as any).basaltDb = {
             executeQuery: async (sql: string, params: any[]) => {
@@ -94,25 +97,73 @@ export default function HomePage(): JSX.Element {
             }
           };
           (window as any).Database = absurderSql.Database;
+
+          // Set up BroadcastChannel for multi-tab sync
+          const syncChannel = new BroadcastChannel('basalt-sync');
+
+          // Listen for changes from other tabs
+          syncChannel.onmessage = async (event) => {
+            console.log('[PWA] Received sync message from another tab:', event.data);
+
+            // Store last sync message for testing
+            (window as any).__lastSyncMessage__ = event.data;
+
+            if (event.data.type === 'data-changed') {
+              // Sync from IndexedDB first to pull leader's changes
+              if (dbRef.current) {
+                await dbRef.current.sync();
+                console.log('[PWA] Synced from IndexedDB');
+
+                // Then reload data from the updated in-memory database
+                await loadNotes(dbRef.current);
+                await loadFolders(dbRef.current);
+                console.log('[PWA] Data reloaded after sync message');
+              } else {
+                console.log('[PWA] Database not ready yet, skipping sync');
+              }
+            }
+          };
+
+          // Store channel for cleanup
+          (window as any).__syncChannel__ = syncChannel;
         }
 
         // Ensure root folder exists
         const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
 
-        const rootFolderResult = await executeQuery(
+        let rootFolderResult = await executeQuery(
           database,
           'SELECT folder_id FROM folders WHERE folder_id = ?',
           ['root']
         );
 
         if (rootFolderResult.rows.length === 0) {
+          // Create root folder (all tabs can do this, it's idempotent)
+          // Temporarily allow non-leader writes for this one-time setup
+          if (typeof database.allowNonLeaderWrites === 'function') {
+            await database.allowNonLeaderWrites(true);
+          }
+
           const now = new Date().toISOString();
-          await executeQuery(
-            database,
-            'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-            ['root', '/', null, now, now]
+          // Call database.executeWithParams directly to bypass queueWrite logic
+          const columnValues = [
+            { type: 'Text', value: 'root' },
+            { type: 'Text', value: '/' },
+            { type: 'Null' },
+            { type: 'Text', value: now },
+            { type: 'Text', value: now }
+          ];
+          await database.executeWithParams(
+            'INSERT OR IGNORE INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+            columnValues
           );
           await database.sync();
+
+          // Re-disable non-leader writes
+          if (typeof database.allowNonLeaderWrites === 'function') {
+            await database.allowNonLeaderWrites(false);
+          }
+
           console.log('[PWA] Created root folder');
         }
 
@@ -208,6 +259,23 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  // Multi-tab sync: Broadcast changes to other tabs
+  async function broadcastDataChange(operation?: string, data?: any) {
+    // Wait a bit for IndexedDB to finish persisting before broadcasting
+    await new Promise(resolve => setTimeout(resolve, 200));
+
+    if (typeof window !== 'undefined' && (window as any).__syncChannel__) {
+      const channel = (window as any).__syncChannel__;
+      channel.postMessage({
+        type: 'data-changed',
+        timestamp: Date.now(),
+        operation,
+        data
+      });
+      console.log('[PWA] Broadcasted data-changed event to other tabs:', operation);
+    }
+  }
+
   async function handleCreateFolder() {
     if (!db || !newFolderName.trim()) {
       setError('Folder name cannot be empty');
@@ -229,6 +297,9 @@ export default function HomePage(): JSX.Element {
       setNewFolderName('');
       setError(null);
       await loadFolders(db);
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Failed to create folder:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -258,6 +329,9 @@ export default function HomePage(): JSX.Element {
       setRenameFolderName('');
       setError(null);
       await loadFolders(db);
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Failed to rename folder:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -298,6 +372,9 @@ export default function HomePage(): JSX.Element {
 
       await loadFolders(db);
       await loadNotes(db);
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Failed to delete folder:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -336,6 +413,9 @@ export default function HomePage(): JSX.Element {
       setSelectedNoteId(noteId);
       setEditTitle(newNoteTitle);
       setEditBody('');
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Failed to create note:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -368,6 +448,9 @@ export default function HomePage(): JSX.Element {
       await db.sync();
       setError(null);
       await loadNotes(db);
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Failed to update note:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -403,6 +486,9 @@ export default function HomePage(): JSX.Element {
 
       setError(null);
       await loadNotes(db);
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Failed to delete note:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -632,6 +718,9 @@ export default function HomePage(): JSX.Element {
 
       // Keep sidebar open so user can see the new note
       setIsLeftSidebarOpen(true);
+
+      // Notify other tabs
+      broadcastDataChange();
     } catch (err) {
       console.error('[PWA] Quick add failed:', err);
       setError(err instanceof Error ? err.message : String(err));
