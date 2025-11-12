@@ -109,15 +109,55 @@ export default function HomePage(): JSX.Element {
             (window as any).__lastSyncMessage__ = event.data;
 
             if (event.data.type === 'data-changed') {
-              // Sync from IndexedDB first to pull leader's changes
-              if (dbRef.current) {
-                await dbRef.current.sync();
-                console.log('[PWA] Synced from IndexedDB');
+              // Execute the same SQL on this tab's database to stay in sync
+              if (dbRef.current && event.data.sql) {
+                try {
+                  // Temporarily allow non-leader writes to execute the synced SQL
+                  if (typeof dbRef.current.allowNonLeaderWrites === 'function') {
+                    await dbRef.current.allowNonLeaderWrites(true);
+                  }
 
-                // Then reload data from the updated in-memory database
+                  // Execute SQL directly, bypassing executeQuery() to avoid leader election checks
+                  const params = event.data.params || [];
+                  if (params.length > 0) {
+                    // Convert params to ColumnValue format
+                    const columnValues = params.map((value: any) => {
+                      if (value === null || value === undefined) return { type: 'Null' };
+                      if (typeof value === 'number') {
+                        return Number.isInteger(value)
+                          ? { type: 'Integer', value }
+                          : { type: 'Real', value };
+                      }
+                      if (typeof value === 'string') return { type: 'Text', value };
+                      return { type: 'Text', value: String(value) };
+                    });
+                    await dbRef.current.executeWithParams(event.data.sql, columnValues);
+                  } else {
+                    await dbRef.current.execute(event.data.sql);
+                  }
+                  console.log('[PWA] Executed synced SQL:', event.data.sql.substring(0, 50));
+
+                  // Re-disable non-leader writes
+                  if (typeof dbRef.current.allowNonLeaderWrites === 'function') {
+                    await dbRef.current.allowNonLeaderWrites(false);
+                  }
+
+                  // Then reload data to refresh UI
+                  await loadNotes(dbRef.current);
+                  await loadFolders(dbRef.current);
+                  console.log('[PWA] Data reloaded after sync message');
+                } catch (err) {
+                  console.error('[PWA] Failed to execute synced SQL:', err);
+                  // Re-enable leader election even on error
+                  if (typeof dbRef.current.allowNonLeaderWrites === 'function') {
+                    await dbRef.current.allowNonLeaderWrites(false);
+                  }
+                }
+              } else if (dbRef.current) {
+                // Fallback: just reload without executing SQL
                 await loadNotes(dbRef.current);
                 await loadFolders(dbRef.current);
-                console.log('[PWA] Data reloaded after sync message');
+                console.log('[PWA] Data reloaded after sync message (no SQL)');
               } else {
                 console.log('[PWA] Database not ready yet, skipping sync');
               }
@@ -157,14 +197,18 @@ export default function HomePage(): JSX.Element {
             'INSERT OR IGNORE INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             columnValues
           );
-          await database.sync();
 
-          // Re-disable non-leader writes
-          if (typeof database.allowNonLeaderWrites === 'function') {
-            await database.allowNonLeaderWrites(false);
+          // Only leader persists to IndexedDB
+          const isLeader = await database.isLeader();
+          if (isLeader) {
+            await database.sync();
+            console.log('[PWA] Created root folder as leader (synced to IndexedDB)');
+          } else {
+            console.log('[PWA] Created root folder as follower (local only)');
           }
 
-          console.log('[PWA] Created root folder');
+          // Keep non-leader writes enabled for BroadcastChannel sync
+          // Non-leaders need to execute SQL received from leader
         }
 
         // Load existing notes and folders
@@ -259,8 +303,40 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  // Multi-tab sync: Ensure non-leader can write (for BroadcastChannel sync)
+  async function ensureWriteEnabled(database: any) {
+    if (!database) return;
+
+    try {
+      const isLeader = await database.isLeader();
+      if (!isLeader && typeof database.allowNonLeaderWrites === 'function') {
+        await database.allowNonLeaderWrites(true);
+        console.log('[PWA] Ensured non-leader writes enabled');
+      }
+    } catch (err) {
+      console.error('[PWA] Failed to enable non-leader writes:', err);
+    }
+  }
+
+  // Multi-tab sync: Only leader persists to IndexedDB
+  async function syncIfLeader(database: any) {
+    if (!database) return;
+
+    try {
+      const isLeader = await database.isLeader();
+      if (isLeader) {
+        await database.sync();
+        console.log('[PWA] Leader synced to IndexedDB');
+      } else {
+        console.log('[PWA] Follower skipped sync (leader handles persistence)');
+      }
+    } catch (err) {
+      console.error('[PWA] Sync check failed:', err);
+    }
+  }
+
   // Multi-tab sync: Broadcast changes to other tabs
-  async function broadcastDataChange(operation?: string, data?: any) {
+  async function broadcastDataChange(sql?: string, params?: any[], operation?: string) {
     // Wait a bit for IndexedDB to finish persisting before broadcasting
     await new Promise(resolve => setTimeout(resolve, 200));
 
@@ -269,10 +345,11 @@ export default function HomePage(): JSX.Element {
       channel.postMessage({
         type: 'data-changed',
         timestamp: Date.now(),
-        operation,
-        data
+        sql,
+        params,
+        operation
       });
-      console.log('[PWA] Broadcasted data-changed event to other tabs:', operation);
+      console.log('[PWA] Broadcasted SQL to other tabs:', sql?.substring(0, 50), operation);
     }
   }
 
@@ -287,19 +364,21 @@ export default function HomePage(): JSX.Element {
       const folderId = `folder_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const now = new Date().toISOString();
 
-      await executeQuery(
-        db,
-        'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
-        [folderId, newFolderName, 'root', now, now]
-      );
+      // Ensure non-leader writes are enabled
+      await ensureWriteEnabled(db);
 
-      await db.sync();
+      const insertSql = 'INSERT INTO folders (folder_id, name, parent_folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)';
+      const insertParams = [folderId, newFolderName, 'root', now, now];
+
+      await executeQuery(db, insertSql, insertParams);
+
+      await syncIfLeader(db);
       setNewFolderName('');
       setError(null);
       await loadFolders(db);
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(insertSql, insertParams, 'create-folder');
     } catch (err) {
       console.error('[PWA] Failed to create folder:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -315,23 +394,23 @@ export default function HomePage(): JSX.Element {
     if (!db || !renameFolderId || !renameFolderName.trim()) return;
 
     try {
+      await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
       const now = new Date().toISOString();
 
-      await executeQuery(
-        db,
-        'UPDATE folders SET name = ?, updated_at = ? WHERE folder_id = ?',
-        [renameFolderName, now, renameFolderId]
-      );
+      const updateSql = 'UPDATE folders SET name = ?, updated_at = ? WHERE folder_id = ?';
+      const updateParams = [renameFolderName, now, renameFolderId];
 
-      await db.sync();
+      await executeQuery(db, updateSql, updateParams);
+
+      await syncIfLeader(db);
       setRenameFolderId(null);
       setRenameFolderName('');
       setError(null);
       await loadFolders(db);
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(updateSql, updateParams, 'rename-folder');
     } catch (err) {
       console.error('[PWA] Failed to rename folder:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -353,15 +432,15 @@ export default function HomePage(): JSX.Element {
     if (!db || !deleteFolderConfirmId) return;
 
     try {
+      await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
 
-      await executeQuery(
-        db,
-        'DELETE FROM folders WHERE folder_id = ?',
-        [deleteFolderConfirmId]
-      );
+      const deleteSql = 'DELETE FROM folders WHERE folder_id = ?';
+      const deleteParams = [deleteFolderConfirmId];
 
-      await db.sync();
+      await executeQuery(db, deleteSql, deleteParams);
+
+      await syncIfLeader(db);
       setDeleteFolderConfirmId(null);
       setDeleteFolderConfirmName('');
       setError(null);
@@ -373,8 +452,8 @@ export default function HomePage(): JSX.Element {
       await loadFolders(db);
       await loadNotes(db);
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(deleteSql, deleteParams, 'delete-folder');
     } catch (err) {
       console.error('[PWA] Failed to delete folder:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -394,17 +473,17 @@ export default function HomePage(): JSX.Element {
     }
 
     try {
+      await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
       const noteId = `note_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const now = new Date().toISOString();
 
-      await executeQuery(
-        db,
-        'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [noteId, newNoteTitle, '', selectedFolderId, now, now]
-      );
+      const insertSql = 'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)';
+      const insertParams = [noteId, newNoteTitle, '', selectedFolderId, now, now];
 
-      await db.sync();
+      await executeQuery(db, insertSql, insertParams);
+
+      await syncIfLeader(db);
       setNewNoteTitle('');
       setError(null);
       await loadNotes(db);
@@ -414,8 +493,8 @@ export default function HomePage(): JSX.Element {
       setEditTitle(newNoteTitle);
       setEditBody('');
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(insertSql, insertParams, 'create-note');
     } catch (err) {
       console.error('[PWA] Failed to create note:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -436,21 +515,21 @@ export default function HomePage(): JSX.Element {
     }
 
     try {
+      await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
       const now = new Date().toISOString();
 
-      await executeQuery(
-        db,
-        'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?',
-        [editTitle, editBody, now, selectedNoteId]
-      );
+      const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
+      const updateParams = [editTitle, editBody, now, selectedNoteId];
 
-      await db.sync();
+      await executeQuery(db, updateSql, updateParams);
+
+      await syncIfLeader(db);
       setError(null);
       await loadNotes(db);
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(updateSql, updateParams, 'update-note');
     } catch (err) {
       console.error('[PWA] Failed to update note:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -466,15 +545,15 @@ export default function HomePage(): JSX.Element {
     if (!db || !deleteConfirmNoteId) return;
 
     try {
+      await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
 
-      await executeQuery(
-        db,
-        'DELETE FROM notes WHERE note_id = ?',
-        [deleteConfirmNoteId]
-      );
+      const deleteSql = 'DELETE FROM notes WHERE note_id = ?';
+      const deleteParams = [deleteConfirmNoteId];
 
-      await db.sync();
+      await executeQuery(db, deleteSql, deleteParams);
+
+      await syncIfLeader(db);
       setDeleteConfirmNoteId(null);
       setDeleteConfirmTitle('');
 
@@ -487,8 +566,8 @@ export default function HomePage(): JSX.Element {
       setError(null);
       await loadNotes(db);
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(deleteSql, deleteParams, 'delete-note');
     } catch (err) {
       console.error('[PWA] Failed to delete note:', err);
       setError(err instanceof Error ? err.message : String(err));
@@ -697,15 +776,15 @@ export default function HomePage(): JSX.Element {
     }
 
     try {
+      await ensureWriteEnabled(db);
       const noteId = `note-${Date.now()}`;
       const now = new Date().toISOString();
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
 
-      await executeQuery(
-        db,
-        'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [noteId, quickAddTitle, '', selectedFolderId === 'root' ? null : selectedFolderId, now, now]
-      );
+      const insertSql = 'INSERT INTO notes (note_id, title, body, folder_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)';
+      const insertParams = [noteId, quickAddTitle, '', selectedFolderId === 'root' ? null : selectedFolderId, now, now];
+
+      await executeQuery(db, insertSql, insertParams);
 
       console.log('[PWA] Quick-added note:', noteId);
 
@@ -719,8 +798,8 @@ export default function HomePage(): JSX.Element {
       // Keep sidebar open so user can see the new note
       setIsLeftSidebarOpen(true);
 
-      // Notify other tabs
-      broadcastDataChange();
+      // Notify other tabs with the SQL to execute
+      broadcastDataChange(insertSql, insertParams, 'quick-add-note');
     } catch (err) {
       console.error('[PWA] Quick add failed:', err);
       setError(err instanceof Error ? err.message : String(err));

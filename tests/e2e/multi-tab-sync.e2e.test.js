@@ -306,9 +306,12 @@ test.describe('INTEGRATION: Multi-Tab Sync', () => {
 
     // Close leader tab
     await leaderTab.close();
-    await nonLeaderTab1.waitForTimeout(2000); // Wait for re-election
 
-    // Check new leader status
+    // Wait for lease to expire (5000ms) plus buffer for re-election process
+    console.log('[E2E] Waiting for lease expiry and re-election...');
+    await nonLeaderTab1.waitForTimeout(6000);
+
+    // Check new leader status with diagnostic info
     const newLeader1 = await nonLeaderTab1.evaluate(() => {
       return window.__db__ ? window.__db__.isLeader() : null;
     });
@@ -317,7 +320,17 @@ test.describe('INTEGRATION: Multi-Tab Sync', () => {
       return window.__db__ ? window.__db__.isLeader() : null;
     });
 
-    console.log('[E2E] After leader close - Tab status:', newLeader1, newLeader2);
+    const leaderInfo1 = await nonLeaderTab1.evaluate(() => {
+      return window.__db__ ? window.__db__.getLeaderInfo() : null;
+    });
+
+    const leaderInfo2 = await nonLeaderTab2.evaluate(() => {
+      return window.__db__ ? window.__db__.getLeaderInfo() : null;
+    });
+
+    console.log('[E2E] After leader close - Tab1:', newLeader1, 'Tab2:', newLeader2);
+    console.log('[E2E] Leader info Tab1:', leaderInfo1);
+    console.log('[E2E] Leader info Tab2:', leaderInfo2);
 
     // Verify a new leader was elected
     const newLeaderCount = [newLeader1, newLeader2].filter(Boolean).length;

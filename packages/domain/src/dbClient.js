@@ -103,12 +103,11 @@ export async function initDb({ absurderSql, storageKey, migrations = [] }) {
 
   console.log('[DEBUG] All migrations completed');
 
-  // TEMPORARY: Keep non-leader writes enabled to test data sync
-  // TODO: Implement proper leader election with queueWrite()
-  // if (typeof db.allowNonLeaderWrites === 'function') {
-  //   await db.allowNonLeaderWrites(false);
-  //   console.log('[DEBUG] Leader election enabled for data operations');
-  // }
+  // Keep non-leader writes enabled for multi-tab coordination
+  // All tabs execute SQL locally, but ONLY the leader persists to IndexedDB via sync()
+  // Follower tabs receive SQL via BroadcastChannel and execute it without syncing
+  // This prevents database corruption from simultaneous IndexedDB writes
+  console.log('[DEBUG] Non-leader writes remain enabled for BroadcastChannel sync');
 
   return db;
 }
@@ -218,19 +217,12 @@ export async function executeQuery(db, sql, params) {
   }
 
   const hasParams = params && params.length > 0;
-  const isWrite = isWriteOperation(sql);
-  const isLeader = db.isLeader ? await db.isLeader() : true;
 
-  // If this is a write operation and we're not the leader, use queueWrite
-  if (isWrite && !isLeader && typeof db.queueWrite === 'function') {
-    const sqlString = hasParams ? buildSqlString(sql, params) : sql;
-    console.log('[dbClient] Non-leader write operation, using queueWrite:', sqlString.substring(0, 100));
-    await db.queueWrite(sqlString);
-    // queueWrite doesn't return results, return empty result
-    return { rows: [], columns: [] };
-  }
+  // NOTE: Leader election check removed because we keep allowNonLeaderWrites(true)
+  // All tabs can execute writes directly, and we use BroadcastChannel to sync SQL
+  // across tabs for multi-tab coordination.
 
-  // Otherwise use normal execution
+  // Execute with or without params
   if (hasParams) {
     if (typeof db.executeWithParams !== 'function') {
       throw new Error('Database instance does not support executeWithParams');
