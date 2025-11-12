@@ -20,6 +20,14 @@ interface Folder {
   updated_at: string;
 }
 
+interface Backlink {
+  backlink_id: string;
+  source_note_id: string;
+  target_note_id: string;
+  source_note_title?: string;
+  created_at: string;
+}
+
 export default function HomePage(): JSX.Element {
   const [db, setDb] = useState<any>(null);
   const dbRef = useRef<any>(null);
@@ -75,6 +83,9 @@ export default function HomePage(): JSX.Element {
   const [draggedFolder, setDraggedFolder] = useState<Folder | null>(null);
   const [draggedNote, setDraggedNote] = useState<Note | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
+  // Backlinks state
+  const [backlinks, setBacklinks] = useState<Backlink[]>([]);
 
   // Initialize database on mount
   useEffect(() => {
@@ -448,6 +459,15 @@ export default function HomePage(): JSX.Element {
     };
   }, []);
 
+  // Load backlinks when selected note changes
+  useEffect(() => {
+    if (db && selectedNoteId) {
+      loadBacklinks(db, selectedNoteId);
+    } else {
+      setBacklinks([]);
+    }
+  }, [db, selectedNoteId]);
+
   async function loadNotes(database: any) {
     try {
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
@@ -497,6 +517,48 @@ export default function HomePage(): JSX.Element {
       console.log('[PWA] Loaded folders:', folderList.length);
     } catch (err) {
       console.error('[PWA] Failed to load folders:', err);
+    }
+  }
+
+  async function loadBacklinks(database: any, targetNoteId: string) {
+    if (!targetNoteId) {
+      setBacklinks([]);
+      return;
+    }
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      // Query backlinks with source note title using JOIN
+      const result = await executeQuery(
+        database,
+        `SELECT
+          b.backlink_id,
+          b.source_note_id,
+          b.target_note_id,
+          b.created_at,
+          n.title as source_note_title
+        FROM backlinks b
+        LEFT JOIN notes n ON b.source_note_id = n.note_id
+        WHERE b.target_note_id = ?
+        ORDER BY b.created_at DESC`,
+        [targetNoteId]
+      );
+
+      const backlinkList: Backlink[] = result.rows.map((row: any) => {
+        const backlink: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          backlink[col] = value.type === 'Null' ? null : value.value;
+        });
+        return backlink as Backlink;
+      });
+
+      setBacklinks(backlinkList);
+      console.log('[PWA] Loaded backlinks for note:', targetNoteId, '→', backlinkList.length);
+    } catch (err) {
+      console.error('[PWA] Failed to load backlinks:', err);
+      setBacklinks([]);
     }
   }
 
@@ -943,6 +1005,17 @@ export default function HomePage(): JSX.Element {
     setError(null);
   }
 
+  function handleBacklinkClick(backlink: Backlink) {
+    // Navigate to the source note (the note that contains the link)
+    const sourceNote = notes.find(n => n.note_id === backlink.source_note_id);
+    if (sourceNote) {
+      handleSelectNote(sourceNote);
+      console.log('[PWA] Navigated to backlink source:', backlink.source_note_id);
+    } else {
+      console.warn('[PWA] Source note not found for backlink:', backlink.source_note_id);
+    }
+  }
+
   async function handleSaveEdit() {
     if (!db || !selectedNoteId || !editTitle.trim()) {
       setError('Cannot save - invalid note data');
@@ -952,16 +1025,41 @@ export default function HomePage(): JSX.Element {
     try {
       await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const { extractWikiLinks } = await import('../../../packages/domain/src/markdown.js');
       const now = new Date().toISOString();
 
+      // Update note
       const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
       const updateParams = [editTitle, editBody, now, selectedNoteId];
 
       await executeQuery(db, updateSql, updateParams);
 
+      // Parse wikilinks from note body
+      const wikilinks = extractWikiLinks(editBody || '');
+      console.log('[PWA] Extracted wikilinks:', wikilinks);
+
+      // Delete old backlinks for this note
+      await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+
+      // Insert new backlinks
+      for (const targetNoteId of wikilinks) {
+        const backlinkId = `backlink_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await executeQuery(
+          db,
+          'INSERT INTO backlinks (backlink_id, source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?, ?)',
+          [backlinkId, selectedNoteId, targetNoteId, '', now]
+        );
+        console.log('[PWA] Created backlink:', selectedNoteId, '→', targetNoteId);
+      }
+
       await syncIfLeader(db);
       setError(null);
       await loadNotes(db);
+
+      // Reload backlinks if we're viewing a note that might have been linked
+      if (selectedNoteId) {
+        await loadBacklinks(db, selectedNoteId);
+      }
 
       // Notify other tabs with the SQL to execute
       broadcastDataChange(updateSql, updateParams, 'update-note');
@@ -1895,6 +1993,8 @@ export default function HomePage(): JSX.Element {
                       className="w-full px-4 py-2 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Note title..."
                     />
+                    {/* Hidden element for tests to read current note title */}
+                    <span data-testid="note-title-display" className="hidden">{editTitle}</span>
                   </div>
 
                   {/* Body Textarea */}
@@ -1904,7 +2004,7 @@ export default function HomePage(): JSX.Element {
                     </label>
                     <textarea
                       id="edit-body"
-                      data-testid="editor-note-body"
+                      data-testid="note-body-textarea"
                       value={editBody}
                       onChange={(e) => setEditBody(e.target.value)}
                       rows={20}
@@ -2007,6 +2107,35 @@ export default function HomePage(): JSX.Element {
               </div>
             </div>
           )}
+
+          {/* BACKLINKS PANEL */}
+          <div data-testid="backlinks-panel" className="mt-6 pt-6 border-t border-gray-300">
+            <h2 className="text-sm font-bold text-gray-700 uppercase mb-3">Backlinks</h2>
+
+            {!selectedNote ? (
+              <p className="text-sm text-gray-500">Select a note to view backlinks</p>
+            ) : backlinks.length === 0 ? (
+              <p className="text-sm text-gray-500">No notes link to this note</p>
+            ) : (
+              <div className="space-y-2">
+                {backlinks.map((backlink) => (
+                  <div
+                    key={backlink.backlink_id}
+                    data-testid="backlink-item"
+                    onClick={() => handleBacklinkClick(backlink)}
+                    className="p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors border border-gray-200"
+                  >
+                    <h4 className="text-sm font-semibold text-blue-600 hover:text-blue-800 mb-1">
+                      {backlink.source_note_title || backlink.source_note_id}
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      {new Date(backlink.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </aside>
 
       </div>
