@@ -71,15 +71,144 @@ export default function HomePage(): JSX.Element {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
 
+  // Drag-and-drop state
+  const [draggedFolder, setDraggedFolder] = useState<Folder | null>(null);
+  const [draggedNote, setDraggedNote] = useState<Note | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
+      console.log('[PWA] ===== START DATABASE INITIALIZATION =====');
       try {
-        console.log('[PWA] Initializing database...');
+        console.log('[PWA] Step 1: About to check for backup...');
 
-        const database = await initBasaltDb('basalt-vault-main');
+        // WORKAROUND: absurder-sql sync() causes corruption
+        // ALWAYS check for backup FIRST before trying to init database
+        const backupData = await new Promise<Uint8Array | null>((resolve) => {
+          // FIX: Always increment version to ensure 'exports' store exists
+          const checkRequest = indexedDB.open('basalt-vault-backup');
+          checkRequest.onsuccess = (event: any) => {
+            const checkDb = event.target.result;
+            const currentVersion = checkDb.version;
+            checkDb.close();
+            console.log('[PWA] Backup DB current version:', currentVersion);
 
-        console.log('[PWA] Database initialized successfully');
+            // Open with incremented version to trigger onupgradeneeded if needed
+            const request = indexedDB.open('basalt-vault-backup', currentVersion + 1);
+
+            request.onupgradeneeded = (event: any) => {
+              const db = event.target.result;
+              console.log('[PWA] Upgrade needed, ensuring exports store exists...');
+              if (!db.objectStoreNames.contains('exports')) {
+                db.createObjectStore('exports');
+                console.log('[PWA] Created exports store during read');
+              }
+            };
+
+            request.onsuccess = (event: any) => {
+              const db = event.target.result;
+
+              if (!db.objectStoreNames.contains('exports')) {
+                console.log('[PWA] Backup DB exists but no exports store (should not happen after upgrade)');
+                db.close();
+                resolve(null);
+                return;
+              }
+
+              const transaction = db.transaction(['exports'], 'readonly');
+              const store = transaction.objectStore('exports');
+              const getRequest = store.get('latest');
+
+              getRequest.onsuccess = () => {
+                const result = getRequest.result;
+                db.close();
+                if (result && result.byteLength > 0) {
+                  console.log('[PWA] Found backup (' + result.byteLength + ' bytes)');
+                  resolve(result);
+                } else {
+                  console.log('[PWA] Backup exists but is empty');
+                  resolve(null);
+                }
+              };
+              getRequest.onerror = () => {
+                console.log('[PWA] Error reading backup');
+                db.close();
+                resolve(null);
+              };
+            };
+
+            request.onerror = () => {
+              console.log('[PWA] Error opening backup DB with version');
+              resolve(null);
+            };
+          };
+
+          checkRequest.onerror = () => {
+            console.log('[PWA] No backup database found (first run)');
+            resolve(null);
+          };
+        });
+
+        console.log('[PWA] Step 2: Backup check complete, backupData size:', backupData ? backupData.byteLength : 0);
+
+        let database;
+        if (backupData) {
+          console.log('[PWA] Step 3: Restoring from backup instead of using potentially corrupted database...');
+          // ALWAYS use a fresh database name to avoid corruption
+          const freshDbName = 'basalt-vault-' + Date.now();
+          console.log('[PWA] Step 3a: Creating database directly from backup (no migrations needed)');
+
+          // Import absurder-sql to create database without migrations
+          const absurderSql = await import('@npiesco/absurder-sql');
+          const initWasm = absurderSql.default || absurderSql;
+          const Database = absurderSql.Database;
+
+          // Initialize WASM
+          if (typeof initWasm === 'function') {
+            await initWasm();
+          }
+
+          // Create empty database
+          console.log('[PWA] Step 3b: Creating empty database:', freshDbName);
+          database = await Database.newDatabase(freshDbName);
+
+          // Enable non-leader writes for BroadcastChannel sync
+          if (typeof database.allowNonLeaderWrites === 'function') {
+            await database.allowNonLeaderWrites(true);
+            console.log('[DEBUG] Non-leader writes enabled for restored database');
+          }
+
+          // Import backup (which already contains schema and data)
+          console.log('[PWA] Step 3c: Importing backup data (', backupData.byteLength, 'bytes)...');
+          await database.importFromFile(backupData);
+          console.log('[PWA] Step 3d: Backup imported successfully');
+
+          // CRITICAL: After importFromFile, close and reopen the database
+          // This is required because importFromFile puts the connection in an invalid state
+          console.log('[PWA] Step 3e: Closing database to finalize import...');
+          await database.close();
+
+          // Wait for IndexedDB sync and close to complete
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          // Reopen the database - now it will have the imported data
+          console.log('[PWA] Step 3f: Reopening database after import...');
+          database = await Database.newDatabase(freshDbName);
+
+          // Re-enable non-leader writes
+          if (typeof database.allowNonLeaderWrites === 'function') {
+            await database.allowNonLeaderWrites(true);
+            console.log('[DEBUG] Non-leader writes re-enabled after reopen');
+          }
+
+          console.log('[PWA] Step 3g: Database ready after import and reopen');
+        } else {
+          console.log('[PWA] Step 3: No backup found, initializing fresh database with basalt-vault-main');
+          database = await initBasaltDb('basalt-vault-main');
+          console.log('[PWA] Step 3a: Fresh database initialized');
+        }
+
         setDb(database);
         dbRef.current = database;
 
@@ -201,6 +330,9 @@ export default function HomePage(): JSX.Element {
           // Only leader persists to IndexedDB
           const isLeader = await database.isLeader();
           if (isLeader) {
+            // CRITICAL FIX: Use TRUNCATE mode for checkpoint
+            await database.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+            await new Promise(resolve => setTimeout(resolve, 100));
             await database.sync();
             console.log('[PWA] Created root folder as leader (synced to IndexedDB)');
           } else {
@@ -319,26 +451,102 @@ export default function HomePage(): JSX.Element {
   }
 
   // Multi-tab sync: Only leader persists to IndexedDB
+  // WORKAROUND: absurder-sql's built-in sync() causes corruption
+  // Instead, we manually export to .db file and store in IndexedDB
   async function syncIfLeader(database: any) {
     if (!database) return;
 
     try {
       const isLeader = await database.isLeader();
       if (isLeader) {
-        await database.sync();
-        console.log('[PWA] Leader synced to IndexedDB');
+        console.log('[PWA] WORKAROUND: Manual export/import instead of broken sync()');
+
+        // Checkpoint WAL first
+        await database.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+
+        // Export database to Uint8Array
+        const exportData = await database.exportToFile();
+        console.log('[PWA] Exported database:', exportData.byteLength, 'bytes');
+
+        // Store in IndexedDB manually
+        const dbName = 'basalt-vault-backup';
+        // Always increment version to trigger onupgradeneeded
+        const currentVersion = await new Promise<number>((resolve) => {
+          const checkRequest = indexedDB.open(dbName);
+          checkRequest.onsuccess = (event: any) => {
+            const db = event.target.result;
+            const version = db.version;
+            db.close();
+            resolve(version);
+          };
+          checkRequest.onerror = () => resolve(0);
+        });
+
+        const request = indexedDB.open(dbName, currentVersion + 1);
+
+        await new Promise((resolve, reject) => {
+          request.onupgradeneeded = (event: any) => {
+            const db = event.target.result;
+            // Always try to create exports store (will throw if exists, that's ok)
+            try {
+              db.createObjectStore('exports');
+              console.log('[PWA] Created backup object store');
+            } catch (e) {
+              console.log('[PWA] Object store already exists');
+            }
+          };
+
+          request.onsuccess = (event: any) => {
+            try {
+              const db = event.target.result;
+              const transaction = db.transaction(['exports'], 'readwrite');
+              const store = transaction.objectStore('exports');
+              const putRequest = store.put(exportData, 'latest');
+
+              putRequest.onsuccess = () => {
+                console.log('[PWA] Put request succeeded');
+              };
+
+              putRequest.onerror = (err) => {
+                console.error('[PWA] Put request failed:', putRequest.error);
+              };
+
+              transaction.oncomplete = () => {
+                console.log('[PWA] Backup stored in IndexedDB (' + exportData.byteLength + ' bytes)');
+                db.close();
+                resolve(undefined);
+              };
+
+              transaction.onerror = (err) => {
+                console.error('[PWA] Transaction error:', transaction.error);
+                db.close();
+                reject(transaction.error);
+              };
+            } catch (err) {
+              console.error('[PWA] Error in onsuccess:', err);
+              reject(err);
+            }
+          };
+
+          request.onerror = () => {
+            console.error('[PWA] IndexedDB open failed:', request.error);
+            reject(request.error);
+          };
+        });
       } else {
         console.log('[PWA] Follower skipped sync (leader handles persistence)');
       }
     } catch (err) {
-      console.error('[PWA] Sync check failed:', err);
+      console.error('[PWA] Sync failed:', err);
+      console.error('[PWA] Error stack:', err.stack);
     }
   }
 
   // Multi-tab sync: Broadcast changes to other tabs
   async function broadcastDataChange(sql?: string, params?: any[], operation?: string) {
-    // Wait a bit for IndexedDB to finish persisting before broadcasting
-    await new Promise(resolve => setTimeout(resolve, 200));
+    // Wait for IndexedDB to finish persisting before broadcasting
+    // Increased delay to ensure transaction commits fully
+    await new Promise(resolve => setTimeout(resolve, 500));
 
     if (typeof window !== 'undefined' && (window as any).__syncChannel__) {
       const channel = (window as any).__syncChannel__;
@@ -465,6 +673,111 @@ export default function HomePage(): JSX.Element {
     setDeleteFolderConfirmId(null);
     setDeleteFolderConfirmName('');
   }
+
+  // ===== DRAG-AND-DROP HANDLERS =====
+
+  function handleFolderDragStart(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    setDraggedFolder(folder);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'folder', folder }));
+    console.log('[PWA] Drag started:', folder.name);
+  }
+
+  function handleFolderDragOver(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId(folder.folder_id);
+  }
+
+  function handleFolderDragLeave(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    setDragOverFolderId(null);
+  }
+
+  async function handleFolderDrop(targetFolder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOverFolderId(null);
+
+    if (!db || !draggedFolder) return;
+
+    // Can't drop folder onto itself
+    if (draggedFolder.folder_id === targetFolder.folder_id) {
+      console.log('[PWA] Cannot drop folder onto itself');
+      return;
+    }
+
+    // Can't drop folder onto its own child (would create circular reference)
+    // For now, skip this check - implement later if needed
+
+    try {
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const now = new Date().toISOString();
+
+      const updateSql = 'UPDATE folders SET parent_folder_id = ?, updated_at = ? WHERE folder_id = ?';
+      const updateParams = [targetFolder.folder_id, now, draggedFolder.folder_id];
+
+      await executeQuery(db, updateSql, updateParams);
+      console.log('[PWA] Folder dropped:', draggedFolder.name, '→', targetFolder.name);
+
+      await syncIfLeader(db);
+      await loadFolders(db);
+      setDraggedFolder(null);
+
+      // Notify other tabs
+      broadcastDataChange(updateSql, updateParams, 'drag-drop-folder');
+    } catch (err) {
+      console.error('[PWA] Failed to drop folder:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleFolderDragEnd(e: React.DragEvent<HTMLDivElement>) {
+    setDraggedFolder(null);
+    setDragOverFolderId(null);
+  }
+
+  function handleNoteDragStart(note: Note, e: React.DragEvent<HTMLDivElement>) {
+    setDraggedNote(note);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'note', note }));
+    console.log('[PWA] Note drag started:', note.title);
+  }
+
+  async function handleNoteDropOnFolder(targetFolder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOverFolderId(null);
+
+    if (!db || !draggedNote) return;
+
+    try {
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const now = new Date().toISOString();
+
+      const updateSql = 'UPDATE notes SET folder_id = ?, updated_at = ? WHERE note_id = ?';
+      const updateParams = [targetFolder.folder_id, now, draggedNote.note_id];
+
+      await executeQuery(db, updateSql, updateParams);
+      console.log('[PWA] Note dropped on folder:', draggedNote.title, '→', targetFolder.name);
+
+      await syncIfLeader(db);
+      await loadNotes(db);
+      setDraggedNote(null);
+
+      // Notify other tabs
+      broadcastDataChange(updateSql, updateParams, 'drag-drop-note');
+    } catch (err) {
+      console.error('[PWA] Failed to drop note:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleNoteDragEnd(e: React.DragEvent<HTMLDivElement>) {
+    setDraggedNote(null);
+    setDragOverFolderId(null);
+  }
+
+  // ===== END DRAG-AND-DROP HANDLERS =====
 
   async function handleCreateNote() {
     if (!db || !newNoteTitle.trim()) {
@@ -1208,7 +1521,24 @@ export default function HomePage(): JSX.Element {
                 <div
                   key={folder.folder_id}
                   data-testid="folder-item"
-                  className="px-2 py-1 text-sm border border-gray-200 rounded bg-gray-50"
+                  data-nested={folder.parent_folder_id !== 'root' && folder.parent_folder_id !== null ? 'true' : 'false'}
+                  draggable={folder.folder_id !== 'root'}
+                  onDragStart={(e) => handleFolderDragStart(folder, e)}
+                  onDragOver={(e) => handleFolderDragOver(folder, e)}
+                  onDragLeave={(e) => handleFolderDragLeave(folder, e)}
+                  onDrop={(e) => {
+                    if (draggedNote) {
+                      handleNoteDropOnFolder(folder, e);
+                    } else if (draggedFolder) {
+                      handleFolderDrop(folder, e);
+                    }
+                  }}
+                  onDragEnd={handleFolderDragEnd}
+                  className={`px-2 py-1 text-sm border border-gray-200 rounded bg-gray-50 transition-colors ${
+                    dragOverFolderId === folder.folder_id ? 'bg-blue-100 border-blue-400' : ''
+                  } ${folder.parent_folder_id !== 'root' && folder.parent_folder_id !== null ? 'ml-4' : ''} ${
+                    folder.folder_id !== 'root' ? 'cursor-move' : ''
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-gray-700">📁 {folder.name}</span>
@@ -1289,6 +1619,9 @@ export default function HomePage(): JSX.Element {
                     key={note.note_id}
                     data-testid="note-item"
                     data-selected={selectedNoteIds.has(note.note_id) ? 'true' : 'false'}
+                    draggable={true}
+                    onDragStart={(e) => handleNoteDragStart(note, e)}
+                    onDragEnd={handleNoteDragEnd}
                     onClick={() => selectionMode ? handleToggleNoteSelection(note.note_id) : handleSelectNote(note)}
                     onTouchStart={(e) => handleNoteLongPressStart(note, e)}
                     onTouchEnd={handleNoteLongPressCancel}
@@ -1296,7 +1629,7 @@ export default function HomePage(): JSX.Element {
                     onMouseDown={(e) => handleNoteLongPressStart(note, e)}
                     onMouseUp={handleNoteLongPressCancel}
                     onMouseLeave={handleNoteLongPressCancel}
-                    className={`p-2 border rounded cursor-pointer transition-colors ${
+                    className={`p-2 border rounded cursor-move transition-colors ${
                       selectedNoteIds.has(note.note_id)
                         ? 'border-green-500 bg-green-100'
                         : selectedNoteId === note.note_id

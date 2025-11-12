@@ -47,12 +47,13 @@ export default {
   ],
 
   // Start Next.js dev server for E2E tests
-  webServer: {
-    command: 'cd apps/pwa && npm run dev',
-    url: 'http://localhost:3000',
-    timeout: 120000,
-    reuseExistingServer: !process.env.CI,
-  },
+  // Temporarily disabled - using manual dev server
+  // webServer: {
+  //   command: 'cd apps/pwa && npm run dev',
+  //   url: 'http://localhost:3000',
+  //   timeout: 120000,
+  //   reuseExistingServer: !process.env.CI,
+  // },
 
   reporter: [
     ['list'],
