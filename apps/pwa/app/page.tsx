@@ -28,6 +28,12 @@ interface Backlink {
   created_at: string;
 }
 
+interface Tag {
+  tag_id: string;
+  label: string;
+  created_at: string;
+}
+
 export default function HomePage(): JSX.Element {
   const [db, setDb] = useState<any>(null);
   const dbRef = useRef<any>(null);
@@ -86,6 +92,11 @@ export default function HomePage(): JSX.Element {
 
   // Backlinks state
   const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+
+  // Tags state
+  const [editTags, setEditTags] = useState<string>('');
+  const [noteTags, setNoteTags] = useState<Tag[]>([]);
+  const [filterTagLabel, setFilterTagLabel] = useState<string | null>(null);
 
   // Initialize database on mount
   useEffect(() => {
@@ -562,6 +573,45 @@ export default function HomePage(): JSX.Element {
     }
   }
 
+  async function loadNoteTags(database: any, noteId: string) {
+    if (!noteId) {
+      setNoteTags([]);
+      setEditTags('');
+      return;
+    }
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const result = await executeQuery(
+        database,
+        `SELECT t.tag_id, t.label, t.created_at
+         FROM tags t
+         JOIN note_tags nt ON t.tag_id = nt.tag_id
+         WHERE nt.note_id = ?
+         ORDER BY t.label ASC`,
+        [noteId]
+      );
+
+      const tagList: Tag[] = result.rows.map((row: any) => {
+        const tag: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          tag[col] = value.type === 'Null' ? null : value.value;
+        });
+        return tag as Tag;
+      });
+
+      setNoteTags(tagList);
+      setEditTags(tagList.map(t => t.label).join(', '));
+      console.log('[PWA] Loaded tags for note:', noteId, '→', tagList.length);
+    } catch (err) {
+      console.error('[PWA] Failed to load tags:', err);
+      setNoteTags([]);
+      setEditTags('');
+    }
+  }
+
   // Multi-tab sync: Ensure non-leader can write (for BroadcastChannel sync)
   async function ensureWriteEnabled(database: any) {
     if (!database) return;
@@ -1003,6 +1053,11 @@ export default function HomePage(): JSX.Element {
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
+
+    // Load tags for this note
+    if (db) {
+      loadNoteTags(db, note.note_id);
+    }
   }
 
   function handleBacklinkClick(backlink: Backlink) {
@@ -1079,15 +1134,79 @@ export default function HomePage(): JSX.Element {
       const backlinkCount = verifyResult.rows[0]?.values[0]?.value || 0;
       console.log('[PWA-BACKLINKS] Backlinks in DB after insert:', backlinkCount);
 
+      // Process tags
+      console.log('[PWA-TAGS] ===== PROCESSING TAGS =====');
+      console.log('[PWA-TAGS] Tags input:', editTags);
+
+      // Parse tags from input (comma-separated)
+      const tagLabels = editTags
+        .split(',')
+        .map(t => t.trim().toLowerCase())
+        .filter(t => t.length > 0);
+      console.log('[PWA-TAGS] Parsed tags:', tagLabels);
+
+      // Delete old note_tags entries for this note
+      await executeQuery(db, 'DELETE FROM note_tags WHERE note_id = ?', [selectedNoteId]);
+      console.log('[PWA-TAGS] ✓ Deleted old note_tags');
+
+      // Insert or get tags, then link to note
+      for (const label of tagLabels) {
+        try {
+          // Check if tag exists
+          const tagCheckResult = await executeQuery(
+            db,
+            'SELECT tag_id FROM tags WHERE label = ?',
+            [label]
+          );
+
+          let tagId: string;
+          if (tagCheckResult.rows.length > 0) {
+            tagId = tagCheckResult.rows[0].values[0].value;
+            console.log('[PWA-TAGS] Tag exists:', label, '→', tagId);
+          } else {
+            // Create new tag
+            tagId = `tag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await executeQuery(
+              db,
+              'INSERT INTO tags (tag_id, label, created_at) VALUES (?, ?, ?)',
+              [tagId, label, now]
+            );
+            console.log('[PWA-TAGS] ✓ Created tag:', label, '→', tagId);
+          }
+
+          // Link tag to note
+          await executeQuery(
+            db,
+            'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)',
+            [selectedNoteId, tagId]
+          );
+          console.log('[PWA-TAGS] ✓ Linked tag to note:', label);
+        } catch (tagErr) {
+          console.error('[PWA-TAGS] ✗ Failed to process tag:', label, tagErr);
+        }
+      }
+
+      // Verify tags were linked
+      const tagVerifyResult = await executeQuery(
+        db,
+        'SELECT COUNT(*) FROM note_tags WHERE note_id = ?',
+        [selectedNoteId]
+      );
+      const tagCount = tagVerifyResult.rows[0]?.values[0]?.value || 0;
+      console.log('[PWA-TAGS] Tags linked to note:', tagCount);
+
+      console.log('[PWA-TAGS] ===== TAGS PROCESSING COMPLETE =====');
+
       await syncIfLeader(db);
       console.log('[PWA-BACKLINKS] ✓ Synced to IndexedDB (if leader)');
 
       setError(null);
       await loadNotes(db);
 
-      // Reload backlinks if we're viewing a note that might have been linked
+      // Reload backlinks and tags for current note
       if (selectedNoteId) {
         await loadBacklinks(db, selectedNoteId);
+        await loadNoteTags(db, selectedNoteId);
       }
 
       console.log('[PWA-BACKLINKS] ===== SAVE COMPLETE =====');
@@ -2044,6 +2163,36 @@ export default function HomePage(): JSX.Element {
                     />
                   </div>
 
+                  {/* Tags Input */}
+                  <div>
+                    <label htmlFor="edit-tags" className="block text-sm font-medium text-gray-700 mb-2">
+                      Tags (comma-separated)
+                    </label>
+                    <input
+                      id="edit-tags"
+                      type="text"
+                      data-testid="note-tags-input"
+                      value={editTags}
+                      onChange={(e) => setEditTags(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., javascript, tutorial, backend"
+                    />
+                    {/* Display current tags as badges */}
+                    {noteTags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {noteTags.map((tag) => (
+                          <span
+                            key={tag.tag_id}
+                            data-testid="note-tag"
+                            className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800"
+                          >
+                            {tag.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Action Buttons */}
                   <div className="flex gap-4">
                     <button
@@ -2059,6 +2208,8 @@ export default function HomePage(): JSX.Element {
                         setSelectedNoteId(null);
                         setEditTitle('');
                         setEditBody('');
+                        setEditTags('');
+                        setNoteTags([]);
                       }}
                       className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
                     >
