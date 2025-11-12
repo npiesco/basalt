@@ -71,6 +71,11 @@ export default function HomePage(): JSX.Element {
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedNoteIds, setSelectedNoteIds] = useState<Set<string>>(new Set());
 
+  // Drag-and-drop state
+  const [draggedFolder, setDraggedFolder] = useState<Folder | null>(null);
+  const [draggedNote, setDraggedNote] = useState<Note | null>(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -668,6 +673,111 @@ export default function HomePage(): JSX.Element {
     setDeleteFolderConfirmId(null);
     setDeleteFolderConfirmName('');
   }
+
+  // ===== DRAG-AND-DROP HANDLERS =====
+
+  function handleFolderDragStart(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    setDraggedFolder(folder);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'folder', folder }));
+    console.log('[PWA] Drag started:', folder.name);
+  }
+
+  function handleFolderDragOver(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverFolderId(folder.folder_id);
+  }
+
+  function handleFolderDragLeave(folder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    setDragOverFolderId(null);
+  }
+
+  async function handleFolderDrop(targetFolder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOverFolderId(null);
+
+    if (!db || !draggedFolder) return;
+
+    // Can't drop folder onto itself
+    if (draggedFolder.folder_id === targetFolder.folder_id) {
+      console.log('[PWA] Cannot drop folder onto itself');
+      return;
+    }
+
+    // Can't drop folder onto its own child (would create circular reference)
+    // For now, skip this check - implement later if needed
+
+    try {
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const now = new Date().toISOString();
+
+      const updateSql = 'UPDATE folders SET parent_folder_id = ?, updated_at = ? WHERE folder_id = ?';
+      const updateParams = [targetFolder.folder_id, now, draggedFolder.folder_id];
+
+      await executeQuery(db, updateSql, updateParams);
+      console.log('[PWA] Folder dropped:', draggedFolder.name, '→', targetFolder.name);
+
+      await syncIfLeader(db);
+      await loadFolders(db);
+      setDraggedFolder(null);
+
+      // Notify other tabs
+      broadcastDataChange(updateSql, updateParams, 'drag-drop-folder');
+    } catch (err) {
+      console.error('[PWA] Failed to drop folder:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleFolderDragEnd(e: React.DragEvent<HTMLDivElement>) {
+    setDraggedFolder(null);
+    setDragOverFolderId(null);
+  }
+
+  function handleNoteDragStart(note: Note, e: React.DragEvent<HTMLDivElement>) {
+    setDraggedNote(note);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('application/json', JSON.stringify({ type: 'note', note }));
+    console.log('[PWA] Note drag started:', note.title);
+  }
+
+  async function handleNoteDropOnFolder(targetFolder: Folder, e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setDragOverFolderId(null);
+
+    if (!db || !draggedNote) return;
+
+    try {
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const now = new Date().toISOString();
+
+      const updateSql = 'UPDATE notes SET folder_id = ?, updated_at = ? WHERE note_id = ?';
+      const updateParams = [targetFolder.folder_id, now, draggedNote.note_id];
+
+      await executeQuery(db, updateSql, updateParams);
+      console.log('[PWA] Note dropped on folder:', draggedNote.title, '→', targetFolder.name);
+
+      await syncIfLeader(db);
+      await loadNotes(db);
+      setDraggedNote(null);
+
+      // Notify other tabs
+      broadcastDataChange(updateSql, updateParams, 'drag-drop-note');
+    } catch (err) {
+      console.error('[PWA] Failed to drop note:', err);
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }
+
+  function handleNoteDragEnd(e: React.DragEvent<HTMLDivElement>) {
+    setDraggedNote(null);
+    setDragOverFolderId(null);
+  }
+
+  // ===== END DRAG-AND-DROP HANDLERS =====
 
   async function handleCreateNote() {
     if (!db || !newNoteTitle.trim()) {
@@ -1411,7 +1521,24 @@ export default function HomePage(): JSX.Element {
                 <div
                   key={folder.folder_id}
                   data-testid="folder-item"
-                  className="px-2 py-1 text-sm border border-gray-200 rounded bg-gray-50"
+                  data-nested={folder.parent_folder_id !== 'root' && folder.parent_folder_id !== null ? 'true' : 'false'}
+                  draggable={folder.folder_id !== 'root'}
+                  onDragStart={(e) => handleFolderDragStart(folder, e)}
+                  onDragOver={(e) => handleFolderDragOver(folder, e)}
+                  onDragLeave={(e) => handleFolderDragLeave(folder, e)}
+                  onDrop={(e) => {
+                    if (draggedNote) {
+                      handleNoteDropOnFolder(folder, e);
+                    } else if (draggedFolder) {
+                      handleFolderDrop(folder, e);
+                    }
+                  }}
+                  onDragEnd={handleFolderDragEnd}
+                  className={`px-2 py-1 text-sm border border-gray-200 rounded bg-gray-50 transition-colors ${
+                    dragOverFolderId === folder.folder_id ? 'bg-blue-100 border-blue-400' : ''
+                  } ${folder.parent_folder_id !== 'root' && folder.parent_folder_id !== null ? 'ml-4' : ''} ${
+                    folder.folder_id !== 'root' ? 'cursor-move' : ''
+                  }`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="text-gray-700">📁 {folder.name}</span>
@@ -1492,6 +1619,9 @@ export default function HomePage(): JSX.Element {
                     key={note.note_id}
                     data-testid="note-item"
                     data-selected={selectedNoteIds.has(note.note_id) ? 'true' : 'false'}
+                    draggable={true}
+                    onDragStart={(e) => handleNoteDragStart(note, e)}
+                    onDragEnd={handleNoteDragEnd}
                     onClick={() => selectionMode ? handleToggleNoteSelection(note.note_id) : handleSelectNote(note)}
                     onTouchStart={(e) => handleNoteLongPressStart(note, e)}
                     onTouchEnd={handleNoteLongPressCancel}
@@ -1499,7 +1629,7 @@ export default function HomePage(): JSX.Element {
                     onMouseDown={(e) => handleNoteLongPressStart(note, e)}
                     onMouseUp={handleNoteLongPressCancel}
                     onMouseLeave={handleNoteLongPressCancel}
-                    className={`p-2 border rounded cursor-pointer transition-colors ${
+                    className={`p-2 border rounded cursor-move transition-colors ${
                       selectedNoteIds.has(note.note_id)
                         ? 'border-green-500 bg-green-100'
                         : selectedNoteId === note.note_id
