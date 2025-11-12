@@ -43,9 +43,7 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 - [ ] Support drag-and-drop folder organization leveraging Zustand state and SQL updates.
 
 ### Multi-Tab Sync (PWA)
-- [ ] Use AbsurderSQL’s leader election APIs (`isLeader`, `getLeaderInfo`, `queueWrite`) to coordinate writes. Follow strategies in `docs/MULTI_TAB_GUIDE.md`.
-- [ ] Add BroadcastChannel listeners so non-leader tabs refresh metadata when changes arrive.
-- [ ] Record `updated_at` timestamps and adopt last-write-wins when merging edits across tabs.
+- [x] **Multi-Tab Sync with Leader Election Validated with E2E Tests (2025-11-12)**: Implemented real-time multi-tab synchronization using AbsurderSQL leader election and BroadcastChannel API. Created comprehensive E2E test (`tests/e2e/multi-tab-sync.e2e.test.js`) validating: leader election (exactly one leader among tabs), note creation syncing across all tabs, folder creation syncing across tabs, note edits syncing in real-time, leader re-election when leader tab closes, write operations working after re-election. Implementation: only leader tab persists writes to IndexedDB via sync(), all tabs execute SQL locally and sync via BroadcastChannel, syncIfLeader() helper ensures only leader persists, ensureWriteEnabled() helper for follower SQL execution, updated all CRUD operations to use new helpers, BroadcastChannel handler executes synced SQL with temporary write access, updated_at timestamps for last-write-wins conflict resolution. Test PASSES - validates complete multi-tab coordination. NO MOCKS - real AbsurderSQL leader election, real BroadcastChannel, real IndexedDB. (See commit 3689b6d)
 
 ---
 
