@@ -24,9 +24,9 @@ test.describe('Autosave Functionality', () => {
     await page.click('[data-testid="note-item"]');
     await page.waitForSelector('[data-testid="edit-title-input"]');
 
-    // Clear and type new title
-    await page.fill('[data-testid="edit-title-input"]', '');
-    await page.fill('[data-testid="edit-title-input"]', 'Autosaved Title');
+    // Clear and type new title (use pressSequentially to trigger onChange properly)
+    await page.locator('[data-testid="edit-title-input"]').clear();
+    await page.locator('[data-testid="edit-title-input"]').pressSequentially('Autosaved Title', { delay: 50 });
 
     // Wait for autosave debounce (should be ~2-3 seconds)
     await page.waitForTimeout(3500);
@@ -59,8 +59,8 @@ test.describe('Autosave Functionality', () => {
     await page.click('[data-testid="note-item"]');
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
 
-    // Type in body
-    await page.fill('[data-testid="edit-body-textarea"]', 'This content should be autosaved automatically.');
+    // Type in body (use pressSequentially to trigger onChange properly)
+    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('This content should be autosaved automatically.', { delay: 20 });
 
     // Wait for autosave
     await page.waitForTimeout(3500);
@@ -89,14 +89,15 @@ test.describe('Autosave Functionality', () => {
     await page.click('[data-testid="note-item"]');
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
 
-    // Type rapidly (simulating fast typing)
-    await page.fill('[data-testid="edit-body-textarea"]', 'First');
+    // Type rapidly (simulating fast typing) - use type() which properly triggers onChange
+    const textarea = page.locator('[data-testid="edit-body-textarea"]');
+    await textarea.pressSequentially('First', { delay: 20 });
     await page.waitForTimeout(500);
-    await page.fill('[data-testid="edit-body-textarea"]', 'First Second');
+    await textarea.pressSequentially(' Second', { delay: 20 });
     await page.waitForTimeout(500);
-    await page.fill('[data-testid="edit-body-textarea"]', 'First Second Third');
+    await textarea.pressSequentially(' Third', { delay: 20 });
     await page.waitForTimeout(500);
-    await page.fill('[data-testid="edit-body-textarea"]', 'First Second Third Fourth');
+    await textarea.pressSequentially(' Fourth', { delay: 20 });
 
     // Verify saving indicator shows during debounce
     const saveIndicator = page.locator('[data-testid="autosave-indicator"]');
@@ -128,7 +129,7 @@ test.describe('Autosave Functionality', () => {
     const notes = page.locator('[data-testid="note-item"]');
     await notes.first().click();
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
-    await page.fill('[data-testid="edit-body-textarea"]', 'Content for note one');
+    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Content for note one', { delay: 20 });
 
     // Immediately switch to second note (should trigger autosave)
     await notes.last().click();
@@ -153,8 +154,8 @@ test.describe('Autosave Functionality', () => {
     await page.click('[data-testid="note-item"]');
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
 
-    // Type content
-    await page.fill('[data-testid="edit-body-textarea"]', 'Testing save indicator');
+    // Type content (use pressSequentially to trigger onChange properly)
+    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Testing save indicator', { delay: 20 });
 
     // Immediately check for "Saving..." indicator (within debounce period)
     await page.waitForTimeout(500);
@@ -176,9 +177,10 @@ test.describe('Autosave Functionality', () => {
     await page.click('[data-testid="note-item"]');
     await page.waitForSelector('[data-testid="edit-title-input"]');
 
-    // Change both title and body
-    await page.fill('[data-testid="edit-title-input"]', 'Updated Title');
-    await page.fill('[data-testid="edit-body-textarea"]', 'Updated body content');
+    // Change both title and body (use pressSequentially to trigger onChange properly)
+    await page.locator('[data-testid="edit-title-input"]').clear();
+    await page.locator('[data-testid="edit-title-input"]').pressSequentially('Updated Title', { delay: 50 });
+    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Updated body content', { delay: 20 });
 
     // Wait for autosave
     await page.waitForTimeout(3500);

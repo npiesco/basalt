@@ -40,6 +40,7 @@ interface Tag {
 export default function HomePage(): JSX.Element {
   const [db, setDb] = useState<any>(null);
   const dbRef = useRef<any>(null);
+  const dbNameRef = useRef<string>('basalt-vault-main'); // Store database name for reopen
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isReady, setIsReady] = useState(false);
@@ -1104,18 +1105,15 @@ export default function HomePage(): JSX.Element {
       await performAutosave();
     }
 
+    // Set the last saved content IMMEDIATELY before changing state
+    lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+    console.log('[AUTOSAVE] Set lastSavedContentRef for note:', note.note_id, lastSavedContentRef.current);
+
     setSelectedNoteId(note.note_id);
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
     setViewMode('edit'); // Start in edit mode when selecting a note
-
-    // Set the last saved content to the note we just opened
-    // Use setTimeout to ensure state updates have completed
-    setTimeout(() => {
-      lastSavedContentRef.current = { title: note.title, body: note.body || '' };
-      console.log('[AUTOSAVE] Set lastSavedContentRef for note:', note.note_id, lastSavedContentRef.current);
-    }, 100);
 
     // Load tags for this note
     if (db) {
@@ -1272,7 +1270,7 @@ export default function HomePage(): JSX.Element {
     );
   }
 
-  // Autosave function - performs the actual save
+  // Autosave function - performs the actual save using proper absurder-sql pattern
   async function performAutosave() {
     console.log('[AUTOSAVE] performAutosave called', {
       db: !!db,
@@ -1350,8 +1348,46 @@ export default function HomePage(): JSX.Element {
         await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [selectedNoteId, tagId]);
       }
 
-      // Sync if leader
-      await syncIfLeader(db);
+      // PROPER ABSURDER-SQL SAVE PATTERN: sync → close → reopen
+      try {
+        console.log('[AUTOSAVE] Step 1: Syncing to IndexedDB...');
+        await db.sync();
+        console.log('[AUTOSAVE] ✓ Step 1 complete');
+      } catch (syncErr: any) {
+        console.error('[AUTOSAVE] ERROR in Step 1 (sync):', syncErr);
+        throw syncErr;
+      }
+
+      try {
+        console.log('[AUTOSAVE] Step 2: Closing database...');
+        await db.close();
+        console.log('[AUTOSAVE] ✓ Step 2 complete');
+      } catch (closeErr: any) {
+        console.error('[AUTOSAVE] ERROR in Step 2 (close):', closeErr);
+        throw closeErr;
+      }
+
+      let newDb;
+      try {
+        console.log('[AUTOSAVE] Step 3: Reopening database with name:', dbNameRef.current);
+        const { Database } = await import('@npiesco/absurder-sql');
+        newDb = await Database.newDatabase(dbNameRef.current);
+        console.log('[AUTOSAVE] ✓ Step 3 complete - database reopened');
+
+        // Update db reference
+        setDb(newDb);
+        dbRef.current = newDb;
+
+        // Expose on window for E2E tests
+        if (typeof window !== 'undefined') {
+          (window as any).basaltDb = newDb;
+        }
+
+        console.log('[AUTOSAVE] ✓ All database references updated');
+      } catch (reopenErr: any) {
+        console.error('[AUTOSAVE] ERROR in Step 3 (reopen):', reopenErr);
+        throw reopenErr;
+      }
 
       // Update last saved content
       lastSavedContentRef.current = { title: editTitle, body: editBody };
@@ -1359,8 +1395,8 @@ export default function HomePage(): JSX.Element {
       console.log('[AUTOSAVE] Save completed successfully');
       setAutosaveStatus('Saved');
 
-      // Reload notes to reflect changes
-      await loadNotes();
+      // Reload notes to reflect changes - use newDb directly instead of state
+      await loadNotes(newDb);
       await loadBacklinks();
 
       // Clear "Saved" message after 2 seconds
@@ -1694,15 +1730,13 @@ export default function HomePage(): JSX.Element {
       await performAutosave();
     }
 
+    // Set the last saved content IMMEDIATELY before changing state
+    lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+
     setSelectedNoteId(note.note_id);
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
-
-    // Set the last saved content to the note we just opened
-    setTimeout(() => {
-      lastSavedContentRef.current = { title: note.title, body: note.body || '' };
-    }, 100);
 
     // Optionally clear search
     // setSearchQuery('');
