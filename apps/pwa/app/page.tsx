@@ -1409,6 +1409,10 @@ export default function HomePage(): JSX.Element {
         throw closeErr;
       }
 
+      // CRITICAL: Wait for IndexedDB to fully flush before reopening
+      console.log('[AUTOSAVE] Waiting for IndexedDB flush...');
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       let newDb;
       try {
         console.log('[AUTOSAVE] Step 3: Reopening database with name:', dbNameRef.current);
@@ -1420,9 +1424,23 @@ export default function HomePage(): JSX.Element {
         setDb(newDb);
         dbRef.current = newDb;
 
-        // Expose on window for E2E tests
+        // Expose on window for E2E tests - MUST WRAP WITH executeQuery HELPER!
         if (typeof window !== 'undefined') {
-          (window as any).basaltDb = newDb;
+          const { executeQuery: execQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+          (window as any).basaltDb = {
+            executeQuery: async (sql: string, params: any[]) => {
+              return execQuery(newDb, sql, params);
+            },
+            clearDatabase: async () => {
+              await execQuery(newDb, 'DELETE FROM note_tags', []);
+              await execQuery(newDb, 'DELETE FROM backlinks', []);
+              await execQuery(newDb, 'DELETE FROM notes', []);
+              await execQuery(newDb, 'DELETE FROM folders WHERE folder_id != ?', ['root']);
+              await execQuery(newDb, 'DELETE FROM tags', []);
+            },
+            __db__: newDb
+          };
         }
 
         // DEBUG: Expose notes state for testing

@@ -15,6 +15,14 @@ const { test, expect } = require('@playwright/test');
 
 test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
   test.beforeEach(async ({ page }) => {
+    // Capture browser console logs
+    page.on('console', msg => {
+      const text = msg.text();
+      if (text.includes('[E2E]') || text.includes('window.basaltDb') || text.includes('Database query')) {
+        console.log('[BROWSER]', text);
+      }
+    });
+
     await page.goto('http://localhost:3000');
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 });
 
@@ -62,22 +70,49 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
     await page.locator(`[data-testid="note-item"]:has-text("${note2Title}")`).click();
     await page.waitForTimeout(300);
 
-    // Fill body with wikilinks
-    await page.locator('[data-testid="note-body-textarea"]').fill(note2Body);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+    // Fill body with wikilinks using CodeMirror
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(note2Body);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+
+    // Extra wait for database to fully reopen and loadNotes to complete
+    await page.waitForTimeout(4000);
     console.log('[E2E] ✓ Created note-2 with wikilinks:', note2Title);
 
-    // Verify backlinks were created in database
+    // Verify backlinks were created in database (with retry for database readiness)
     const backlinks = await page.evaluate(async (targetId) => {
-      const result = await window.basaltDb.executeQuery(
-        'SELECT source_note_id, target_note_id FROM backlinks WHERE target_note_id = ?',
-        [targetId]
-      );
-      return result.rows.map(row => ({
-        source: row.values[0].value,
-        target: row.values[1].value
-      }));
+      // Retry logic for database queries after autosave
+      for (let i = 0; i < 5; i++) {
+        console.log(`[E2E] Database query attempt ${i+1}/5`);
+        console.log('[E2E] window.basaltDb type:', typeof window.basaltDb);
+        console.log('[E2E] window.basaltDb?.executeQuery type:', typeof window.basaltDb?.executeQuery);
+
+        try {
+          if (typeof window.basaltDb?.executeQuery === 'function') {
+            const result = await window.basaltDb.executeQuery(
+              'SELECT source_note_id, target_note_id FROM backlinks WHERE target_note_id = ?',
+              [targetId]
+            );
+            console.log('[E2E] Query successful!');
+            return result.rows.map(row => ({
+              source: row.values[0].value,
+              target: row.values[1].value
+            }));
+          } else {
+            console.log('[E2E] window.basaltDb.executeQuery is not a function');
+          }
+        } catch (err) {
+          console.log(`[E2E] Database query error:`, err?.message || String(err));
+          console.log(`[E2E] Full error:`, JSON.stringify(err, Object.getOwnPropertyNames(err)));
+        }
+        if (i < 4) await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      throw new Error('Database not ready after 5 retries');
     }, note1Id);
 
     console.log('[E2E] Backlinks in database:', backlinks);
@@ -113,9 +148,15 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
     await page.locator(`[data-testid="note-item"]:has-text("${note2Title}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(note2Body);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror for note-2
+    await page.waitForSelector('.cm-content');
+    let cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(note2Body);
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(4000); // Wait for database to fully reopen
     console.log('[E2E] ✓ Created note-2 referencing note-1');
 
     // Create note-3 that also references note-1
@@ -128,9 +169,15 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
     await page.locator(`[data-testid="note-item"]:has-text("${note3Title}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(note3Body);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror for note-3
+    await page.waitForSelector('.cm-content');
+    cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(note3Body);
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(4000); // Wait for database to fully reopen
     console.log('[E2E] ✓ Created note-3 referencing note-1');
 
     // NOW click note-1 to view its backlinks
@@ -180,9 +227,15 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
     await page.locator(`[data-testid="note-item"]:has-text("${noteBTitle}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(noteBBody);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(noteBBody);
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(4000); // Wait for database to fully reopen
 
     // Click note-A to see backlinks
     await page.locator(`[data-testid="note-item"]:has-text("${noteATitle}")`).click();
@@ -242,9 +295,14 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
     await page.waitForTimeout(300);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(`References [[${targetId1}]]`);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+    // Use CodeMirror to add first wikilink
+    await page.waitForSelector('.cm-content');
+    let cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(`References [[${targetId1}]]`);
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(4000); // Wait for database to fully reopen
 
     // Verify 1 backlink exists for target1
     const backlinksBeforeUpdate = await page.evaluate(async (targetId) => {
@@ -260,11 +318,16 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
     await page.waitForTimeout(300);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(
-      `References [[${targetId1}]] and [[${targetId2}]]`
-    );
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+    // Clear and type new content with both wikilinks
+    await page.waitForSelector('.cm-content');
+    cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    // Select all and replace
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type(`References [[${targetId1}]] and [[${targetId2}]]`);
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(4000); // Wait for database to fully reopen
 
     // Verify 2 backlinks now exist (one for each target)
     const backlinksAfterUpdate = await page.evaluate(async () => {
@@ -316,9 +379,15 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(`Links to [[${targetId}]]`);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(`Links to [[${targetId}]]`);
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(4000); // Wait for database to fully reopen
 
     // Check if foreign keys are enabled
     const fkEnabled = await page.evaluate(async () => {
