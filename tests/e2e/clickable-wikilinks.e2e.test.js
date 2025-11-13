@@ -45,9 +45,12 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(3500);
     await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
 
+    // Wait extra time for React state updates after database reload
+    await page.waitForTimeout(2000);
+
     // Switch to preview mode to see rendered wikilinks
     await page.locator('[data-testid="toggle-preview-mode"]').click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
     // Verify wikilinks are rendered as clickable elements in preview
     const wikilinkElements = page.locator('[data-testid="wikilink"]');
@@ -102,12 +105,15 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(3500);
     await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
 
+    // Wait extra time for React state updates after database reload
+    await page.waitForTimeout(2000);
+
     // Verify we're viewing note B
     await expect(page.locator('[data-testid="edit-title-input"]')).toHaveValue(noteBTitle);
 
     // Switch to preview mode to see wikilink
     await page.locator('[data-testid="toggle-preview-mode"]').click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
     // Click the wikilink
     await page.locator('[data-testid="wikilink"]').first().click();
@@ -142,9 +148,12 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(3500);
     await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
 
+    // Wait extra time for React state updates after database reload
+    await page.waitForTimeout(2000);
+
     // Switch to preview mode to see broken wikilink
     await page.locator('[data-testid="toggle-preview-mode"]').click();
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
     // Verify broken wikilink is rendered
     const brokenWikilink = page.locator('[data-testid="wikilink-broken"]');
