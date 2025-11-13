@@ -1169,8 +1169,6 @@ export default function HomePage(): JSX.Element {
       return <p className="text-gray-400 italic">No content</p>;
     }
 
-    console.log('[PWA-MARKDOWN] Rendering preview for body:', body.substring(0, 100));
-
     // STEP 1: Extract wikilinks and replace with placeholders
     // Use {{}} to avoid markdown interpreting __ as bold/italic
     const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
@@ -1179,11 +1177,11 @@ export default function HomePage(): JSX.Element {
 
     const bodyWithPlaceholders = body.replace(WIKILINK_PATTERN, (match, noteId) => {
       const targetNoteId = noteId.trim();
+      // Find note by exact ID match
       const targetNote = notes.find(n => n.note_id === targetNoteId);
       const placeholder = `{{WIKILINK_${wikilinkIndex}}}`;
       wikilinks.push({ id: targetNoteId, note: targetNote || null });
       wikilinkIndex++;
-      console.log('[PWA-MARKDOWN] Found wikilink to:', targetNoteId, '→ placeholder:', placeholder);
       return placeholder;
     });
 
@@ -1194,8 +1192,6 @@ export default function HomePage(): JSX.Element {
     });
 
     const htmlContent = marked.parse(bodyWithPlaceholders) as string;
-    console.log('[PWA-MARKDOWN] Parsed markdown to HTML, wikilinks found:', wikilinks.length);
-    console.log('[PWA-MARKDOWN] HTML content preview:', htmlContent.substring(0, 300));
 
     // STEP 3: Replace placeholders with React wikilink components
     // Split HTML by placeholder tokens and rebuild with React components
@@ -1234,7 +1230,6 @@ export default function HomePage(): JSX.Element {
             {wikilink.note.title}
           </span>
         );
-        console.log('[PWA-MARKDOWN] Rendered valid wikilink:', wikilink.note.title);
       } else {
         // Broken wikilink
         parts.push(
@@ -1246,7 +1241,6 @@ export default function HomePage(): JSX.Element {
             {wikilink.id}
           </span>
         );
-        console.log('[PWA-MARKDOWN] Rendered broken wikilink:', wikilink.id);
       }
 
       lastIndex = match.index + match[0].length;
@@ -1262,8 +1256,6 @@ export default function HomePage(): JSX.Element {
         />
       );
     }
-
-    console.log('[PWA-MARKDOWN] Rendered', parts.length, 'parts,', replacementCount, 'wikilink placeholders replaced');
 
     // Wrap in a container with markdown styling
     return (

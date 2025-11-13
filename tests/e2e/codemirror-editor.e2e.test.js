@@ -141,10 +141,7 @@ test.describe('CodeMirror 6 Editor', () => {
     await expect(note2Content).toHaveText('Content for note two');
   });
 
-  // KNOWN ISSUE: Wikilinks feature has a bug where note IDs aren't mapped correctly in preview
-  // The CodeMirror editor correctly saves wikilinks, but the preview rendering maps wrong note titles to IDs
-  // This is a wikilinks feature bug, not a CodeMirror integration issue
-  test.skip('should work with existing wikilinks functionality', async ({ page }) => {
+  test('should work with existing wikilinks functionality', async ({ page }) => {
     // Create target note
     await page.fill('[data-testid="note-title-input"]', 'Target Note');
     await page.click('[data-testid="new-note-button"]');
@@ -153,9 +150,14 @@ test.describe('CodeMirror 6 Editor', () => {
     // Wait for note to be fully created and persisted
     await page.waitForTimeout(1000);
 
-    // Get the target note ID from the list
-    const targetNoteItem = page.locator('[data-testid="note-item"]').filter({ hasText: 'Target Note' });
+    // Get the target note ID from the list - use first() to ensure single element
+    const targetNoteItem = page.locator('[data-testid="note-item"]').filter({ hasText: 'Target Note' }).first();
     const targetNoteId = await targetNoteItem.getAttribute('data-note-id');
+
+    // Verify we got a valid ID
+    if (!targetNoteId || !targetNoteId.startsWith('note_')) {
+      throw new Error(`Invalid target note ID: ${targetNoteId}`);
+    }
 
     // Create source note with wikilink
     await page.fill('[data-testid="note-title-input"]', 'Source Note');
@@ -175,6 +177,9 @@ test.describe('CodeMirror 6 Editor', () => {
     // Wait for autosave
     await page.waitForTimeout(3500);
 
+    // Wait extra time to ensure notes are reloaded after autosave
+    await page.waitForTimeout(1000);
+
     // Ensure we're still in the editor (note is selected)
     await page.waitForSelector('[data-testid="edit-title-input"]', { state: 'visible' });
 
@@ -184,9 +189,9 @@ test.describe('CodeMirror 6 Editor', () => {
     await viewModeButton.scrollIntoViewIfNeeded();
     await viewModeButton.click();
 
-    // Wait for preview to render
+    // Wait for preview to render with updated notes data
     await page.waitForSelector('[data-testid="note-preview"]');
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
     // Wikilink should be rendered as clickable
     const wikilink = page.locator('[data-testid="wikilink"]');
