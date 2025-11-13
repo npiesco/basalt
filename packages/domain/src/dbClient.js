@@ -103,6 +103,16 @@ export async function initDb({ absurderSql, storageKey, migrations = [] }) {
 
   console.log('[DEBUG] All migrations completed');
 
+  // Enable foreign keys (must be set per connection, not persisted across reopens)
+  // This ensures CASCADE DELETE and other FK constraints work correctly
+  try {
+    await db.execute('PRAGMA foreign_keys = ON');
+    console.log('[DEBUG] Foreign keys enabled successfully');
+  } catch (error) {
+    console.error('[ERROR] Failed to enable foreign keys:', error);
+    throw error;
+  }
+
   // Keep non-leader writes enabled for multi-tab coordination
   // All tabs execute SQL locally, but ONLY the leader persists to IndexedDB via sync()
   // Follower tabs receive SQL via BroadcastChannel and execute it without syncing
