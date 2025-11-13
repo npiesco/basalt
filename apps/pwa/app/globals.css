@@ -1,5 +1,7 @@
+@import "tailwindcss";
+
 :root {
-  color-scheme: dark light;
+  color-scheme: light;
   font-family: system-ui, sans-serif;
 }
 
@@ -74,6 +76,8 @@
 @media (min-width: 768px) {
   .sidebar-mobile {
     position: relative;
+    width: 320px;
+    flex-shrink: 0;
     transform: translateX(0) !important;
   }
 
@@ -87,14 +91,13 @@
 
   .sidebar-right-mobile {
     display: block;
+    flex-shrink: 0;
   }
 }
 
 body {
   margin: 0;
-  padding: 2rem;
-  background: #0f172a;
-  color: #e2e8f0;
+  padding: 0;
 }
 
 .note-title-card {
