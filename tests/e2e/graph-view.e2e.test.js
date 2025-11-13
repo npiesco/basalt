@@ -159,10 +159,14 @@ test.describe('INTEGRATION: Graph View', () => {
         node.trigger('tap'); // Cytoscape tap event
       }
     }, note1Id);
-    await page.waitForTimeout(500);
 
-    // Verify note 1 is now selected in editor
-    const selectedTitle = await page.locator('[data-testid="note-title-display"]').textContent();
+    // Wait for graph view to close
+    await expect(page.locator('[data-testid="graph-view-panel"]')).not.toBeVisible();
+    await page.waitForTimeout(300);
+
+    // Verify note 1 is now selected in editor (check the visible input value)
+    await expect(page.locator('[data-testid="editor-note-title"]')).toBeVisible();
+    const selectedTitle = await page.locator('[data-testid="editor-note-title"]').inputValue();
     expect(selectedTitle).toContain(note1Title);
 
     console.log('[E2E] ✓✓✓ GRAPH NODE NAVIGATION WORKS!');

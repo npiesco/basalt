@@ -1926,8 +1926,11 @@ export default function HomePage(): JSX.Element {
       const nodeId = evt.target.id();
       console.log('[PWA-GRAPH] Node clicked:', nodeId);
 
-      // Navigate to the clicked note
-      handleSelectNote(nodeId);
+      // Find the note object and navigate to it
+      const note = notes.find(n => n.note_id === nodeId);
+      if (note) {
+        handleSelectNote(note);
+      }
 
       // Optionally close graph view after navigation
       setIsGraphViewOpen(false);
@@ -2486,7 +2489,7 @@ export default function HomePage(): JSX.Element {
                       placeholder="Note title..."
                     />
                     {/* Hidden element for tests to read current note title */}
-                    <span data-testid="note-title-display" className="hidden">{editTitle}</span>
+                    <span data-testid="note-title-display" className="absolute opacity-0 pointer-events-none">{editTitle}</span>
                   </div>
 
                   {/* Body Edit/Preview Section */}
