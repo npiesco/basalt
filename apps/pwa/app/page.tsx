@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initBasaltDb } from '../lib/db/client';
 import cytoscape from 'cytoscape';
 import { marked } from 'marked';
+import CodeMirrorEditor from './components/CodeMirrorEditor';
 
 interface Note {
   note_id: string;
@@ -112,6 +113,7 @@ export default function HomePage(): JSX.Element {
   const [autosaveStatus, setAutosaveStatus] = useState<'' | 'Saving...' | 'Saved' | 'No changes'>('');
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
+  const currentContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
 
   // Initialize database on mount
   useEffect(() => {
@@ -1107,6 +1109,7 @@ export default function HomePage(): JSX.Element {
 
     // Set the last saved content IMMEDIATELY before changing state
     lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+    currentContentRef.current = { title: note.title, body: note.body || '' };
     console.log('[AUTOSAVE] Set lastSavedContentRef for note:', note.note_id, lastSavedContentRef.current);
 
     setSelectedNoteId(note.note_id);
@@ -1272,27 +1275,19 @@ export default function HomePage(): JSX.Element {
 
   // Autosave function - performs the actual save using proper absurder-sql pattern
   async function performAutosave() {
-    console.log('[AUTOSAVE] performAutosave called', {
-      db: !!db,
-      selectedNoteId,
-      editTitle,
-      lastSaved: lastSavedContentRef.current
-    });
+    const currentTitle = currentContentRef.current.title;
+    const currentBody = currentContentRef.current.body;
 
-    if (!db || !selectedNoteId || !editTitle.trim()) {
-      console.log('[AUTOSAVE] Skipping - missing db, noteId, or title');
+    if (!db || !selectedNoteId || !currentTitle.trim()) {
       return;
     }
 
     // Check if content has actually changed
-    if (editTitle === lastSavedContentRef.current.title &&
-        editBody === lastSavedContentRef.current.body) {
-      console.log('[AUTOSAVE] No changes detected');
+    if (currentTitle === lastSavedContentRef.current.title &&
+        currentBody === lastSavedContentRef.current.body) {
       setAutosaveStatus('No changes');
       return;
     }
-
-    console.log('[AUTOSAVE] Changes detected, saving...');
 
     try {
       setAutosaveStatus('Saving...');
@@ -1304,11 +1299,11 @@ export default function HomePage(): JSX.Element {
 
       // Update note
       const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
-      const updateParams = [editTitle, editBody, now, selectedNoteId];
+      const updateParams = [currentTitle, currentBody, now, selectedNoteId];
       await executeQuery(db, updateSql, updateParams);
 
       // Parse wikilinks from note body
-      const wikilinks = extractWikiLinks(editBody || '');
+      const wikilinks = extractWikiLinks(currentBody || '');
 
       // Delete old backlinks for this note
       await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
@@ -1390,7 +1385,7 @@ export default function HomePage(): JSX.Element {
       }
 
       // Update last saved content
-      lastSavedContentRef.current = { title: editTitle, body: editBody };
+      lastSavedContentRef.current = { title: currentTitle, body: currentBody };
 
       console.log('[AUTOSAVE] Save completed successfully');
       setAutosaveStatus('Saved');
@@ -2657,6 +2652,7 @@ export default function HomePage(): JSX.Element {
                   <div
                     key={note.note_id}
                     data-testid="note-item"
+                    data-note-id={note.note_id}
                     data-selected={selectedNoteIds.has(note.note_id) ? 'true' : 'false'}
                     draggable={true}
                     onDragStart={(e) => handleNoteDragStart(note, e)}
@@ -2754,6 +2750,7 @@ export default function HomePage(): JSX.Element {
                       value={editTitle}
                       onChange={(e) => {
                         setEditTitle(e.target.value);
+                        currentContentRef.current.title = e.target.value;
                         triggerAutosave();
                       }}
                       className="w-full px-4 py-2 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -2796,18 +2793,21 @@ export default function HomePage(): JSX.Element {
                     </div>
 
                     {viewMode === 'edit' ? (
-                      <textarea
-                        id="edit-body"
+                      <div
                         data-testid="edit-body-textarea"
-                        value={editBody}
-                        onChange={(e) => {
-                          setEditBody(e.target.value);
-                          triggerAutosave();
-                        }}
-                        rows={20}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                        placeholder="Write your note content here..."
-                      />
+                        className="w-full border border-gray-300 rounded-lg overflow-hidden"
+                        style={{ minHeight: '480px' }}
+                      >
+                        <CodeMirrorEditor
+                          value={editBody}
+                          onChange={(newValue) => {
+                            setEditBody(newValue);
+                            currentContentRef.current.body = newValue;
+                            triggerAutosave();
+                          }}
+                          className="w-full h-full"
+                        />
+                      </div>
                     ) : (
                       <div
                         data-testid="note-preview"
