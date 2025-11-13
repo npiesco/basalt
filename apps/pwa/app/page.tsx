@@ -10,6 +10,7 @@ interface Note {
   folder_id: string | null;
   created_at: string;
   updated_at: string;
+  tags?: Tag[];
 }
 
 interface Folder {
@@ -18,6 +19,20 @@ interface Folder {
   parent_folder_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface Backlink {
+  source_note_id: string;
+  target_note_id: string;
+  source_note_title?: string;
+  context_snippet?: string;
+  created_at: string;
+}
+
+interface Tag {
+  tag_id: string;
+  label: string;
+  created_at: string;
 }
 
 export default function HomePage(): JSX.Element {
@@ -34,6 +49,7 @@ export default function HomePage(): JSX.Element {
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
+  const [viewMode, setViewMode] = useState<'edit' | 'preview'>('edit'); // Start in edit mode, switch to preview after save
 
   // Folder management state
   const [newFolderName, setNewFolderName] = useState('');
@@ -75,6 +91,14 @@ export default function HomePage(): JSX.Element {
   const [draggedFolder, setDraggedFolder] = useState<Folder | null>(null);
   const [draggedNote, setDraggedNote] = useState<Note | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
+
+  // Backlinks state
+  const [backlinks, setBacklinks] = useState<Backlink[]>([]);
+
+  // Tags state
+  const [editTags, setEditTags] = useState<string>('');
+  const [noteTags, setNoteTags] = useState<Tag[]>([]);
+  const [filterTagLabel, setFilterTagLabel] = useState<string | null>(null);
 
   // Initialize database on mount
   useEffect(() => {
@@ -448,6 +472,15 @@ export default function HomePage(): JSX.Element {
     };
   }, []);
 
+  // Load backlinks when selected note changes
+  useEffect(() => {
+    if (db && selectedNoteId) {
+      loadBacklinks(db, selectedNoteId);
+    } else {
+      setBacklinks([]);
+    }
+  }, [db, selectedNoteId]);
+
   async function loadNotes(database: any) {
     try {
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
@@ -465,6 +498,36 @@ export default function HomePage(): JSX.Element {
           note[col] = value.type === 'Null' ? null : value.value;
         });
         return note as Note;
+      });
+
+      // Load tags for all notes
+      const tagsResult = await executeQuery(
+        database,
+        `SELECT nt.note_id, t.tag_id, t.label, t.created_at
+         FROM note_tags nt
+         JOIN tags t ON nt.tag_id = t.tag_id
+         ORDER BY t.label ASC`,
+        []
+      );
+
+      // Group tags by note_id
+      const tagsByNoteId: Record<string, Tag[]> = {};
+      tagsResult.rows.forEach((row: any) => {
+        const noteId = row.values[0].value;
+        const tag: Tag = {
+          tag_id: row.values[1].value,
+          label: row.values[2].value,
+          created_at: row.values[3].value
+        };
+        if (!tagsByNoteId[noteId]) {
+          tagsByNoteId[noteId] = [];
+        }
+        tagsByNoteId[noteId].push(tag);
+      });
+
+      // Attach tags to notes
+      noteList.forEach(note => {
+        note.tags = tagsByNoteId[note.note_id] || [];
       });
 
       setNotes(noteList);
@@ -497,6 +560,87 @@ export default function HomePage(): JSX.Element {
       console.log('[PWA] Loaded folders:', folderList.length);
     } catch (err) {
       console.error('[PWA] Failed to load folders:', err);
+    }
+  }
+
+  async function loadBacklinks(database: any, targetNoteId: string) {
+    if (!targetNoteId) {
+      setBacklinks([]);
+      return;
+    }
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      // Query backlinks with source note title using JOIN
+      const result = await executeQuery(
+        database,
+        `SELECT
+          b.source_note_id,
+          b.target_note_id,
+          b.context_snippet,
+          b.created_at,
+          n.title as source_note_title
+        FROM backlinks b
+        LEFT JOIN notes n ON b.source_note_id = n.note_id
+        WHERE b.target_note_id = ?
+        ORDER BY b.created_at DESC`,
+        [targetNoteId]
+      );
+
+      const backlinkList: Backlink[] = result.rows.map((row: any) => {
+        const backlink: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          backlink[col] = value.type === 'Null' ? null : value.value;
+        });
+        return backlink as Backlink;
+      });
+
+      setBacklinks(backlinkList);
+      console.log('[PWA] Loaded backlinks for note:', targetNoteId, '→', backlinkList.length);
+    } catch (err) {
+      console.error('[PWA] Failed to load backlinks:', err);
+      setBacklinks([]);
+    }
+  }
+
+  async function loadNoteTags(database: any, noteId: string) {
+    if (!noteId) {
+      setNoteTags([]);
+      setEditTags('');
+      return;
+    }
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      const result = await executeQuery(
+        database,
+        `SELECT t.tag_id, t.label, t.created_at
+         FROM tags t
+         JOIN note_tags nt ON t.tag_id = nt.tag_id
+         WHERE nt.note_id = ?
+         ORDER BY t.label ASC`,
+        [noteId]
+      );
+
+      const tagList: Tag[] = result.rows.map((row: any) => {
+        const tag: any = {};
+        result.columns.forEach((col: string, idx: number) => {
+          const value = row.values[idx];
+          tag[col] = value.type === 'Null' ? null : value.value;
+        });
+        return tag as Tag;
+      });
+
+      setNoteTags(tagList);
+      setEditTags(tagList.map(t => t.label).join(', '));
+      console.log('[PWA] Loaded tags for note:', noteId, '→', tagList.length);
+    } catch (err) {
+      console.error('[PWA] Failed to load tags:', err);
+      setNoteTags([]);
+      setEditTags('');
     }
   }
 
@@ -941,6 +1085,121 @@ export default function HomePage(): JSX.Element {
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
+    setViewMode('edit'); // Start in edit mode when selecting a note
+
+    // Load tags for this note
+    if (db) {
+      loadNoteTags(db, note.note_id);
+    }
+  }
+
+  function handleBacklinkClick(backlink: Backlink) {
+    // Navigate to the source note (the note that contains the link)
+    const sourceNote = notes.find(n => n.note_id === backlink.source_note_id);
+    if (sourceNote) {
+      handleSelectNote(sourceNote);
+      console.log('[PWA] Navigated to backlink source:', backlink.source_note_id);
+    } else {
+      console.warn('[PWA] Source note not found for backlink:', backlink.source_note_id);
+    }
+  }
+
+  function handleTagFilterClick(tagLabel: string) {
+    setFilterTagLabel(tagLabel);
+    console.log('[PWA] Filtering notes by tag:', tagLabel);
+  }
+
+  function handleClearTagFilter() {
+    setFilterTagLabel(null);
+    console.log('[PWA] Cleared tag filter');
+  }
+
+  async function handleWikilinkClick(targetNoteId: string) {
+    console.log('[PWA-WIKILINK] Clicked wikilink, navigating to:', targetNoteId);
+
+    if (!db) {
+      console.error('[PWA-WIKILINK] Database not initialized');
+      return;
+    }
+
+    // Find the note in our notes array
+    const targetNote = notes.find(n => n.note_id === targetNoteId);
+
+    if (targetNote) {
+      console.log('[PWA-WIKILINK] Found target note:', targetNote.title);
+      handleSelectNote(targetNote); // Pass the Note object, not just the ID
+    } else {
+      console.warn('[PWA-WIKILINK] Target note not found:', targetNoteId);
+    }
+  }
+
+  function renderNotePreview(body: string) {
+    if (!body) {
+      return <p className="text-gray-400 italic">No content</p>;
+    }
+
+    // Parse wikilinks using regex: [[note_id]]
+    const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match;
+
+    console.log('[PWA-WIKILINK] Rendering preview for body:', body.substring(0, 100));
+
+    while ((match = WIKILINK_PATTERN.exec(body)) !== null) {
+      // Add text before the wikilink
+      if (match.index > lastIndex) {
+        parts.push(body.substring(lastIndex, match.index));
+      }
+
+      const targetNoteId = match[1].trim();
+      console.log('[PWA-WIKILINK] Found wikilink to:', targetNoteId);
+
+      // Look up the note to get its title
+      const targetNote = notes.find(n => n.note_id === targetNoteId);
+
+      if (targetNote) {
+        // Valid wikilink - render as clickable link
+        parts.push(
+          <span
+            key={`wikilink-${match.index}`}
+            data-testid="wikilink"
+            onClick={() => handleWikilinkClick(targetNoteId)}
+            className="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer font-medium"
+          >
+            {targetNote.title}
+          </span>
+        );
+        console.log('[PWA-WIKILINK] Rendered valid wikilink:', targetNote.title);
+      } else {
+        // Broken wikilink - render with red styling
+        parts.push(
+          <span
+            key={`wikilink-broken-${match.index}`}
+            data-testid="wikilink-broken"
+            className="inline-flex items-center px-2 py-0.5 rounded bg-red-50 text-red-600 cursor-not-allowed font-medium border border-red-200"
+          >
+            {targetNoteId}
+          </span>
+        );
+        console.log('[PWA-WIKILINK] Rendered broken wikilink:', targetNoteId);
+      }
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text after last wikilink
+    if (lastIndex < body.length) {
+      parts.push(body.substring(lastIndex));
+    }
+
+    console.log('[PWA-WIKILINK] Rendered', parts.length, 'parts');
+
+    return (
+      <div className="whitespace-pre-wrap font-mono text-sm">
+        {parts.length > 0 ? parts : body}
+      </div>
+    );
   }
 
   async function handleSaveEdit() {
@@ -952,16 +1211,140 @@ export default function HomePage(): JSX.Element {
     try {
       await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const { extractWikiLinks } = await import('../../../packages/domain/src/markdown.js');
       const now = new Date().toISOString();
 
+      console.log('[PWA-BACKLINKS] ===== STARTING NOTE SAVE WITH BACKLINKS =====');
+      console.log('[PWA-BACKLINKS] Note ID:', selectedNoteId);
+      console.log('[PWA-BACKLINKS] Note body:', editBody?.substring(0, 100));
+
+      // Update note
       const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
       const updateParams = [editTitle, editBody, now, selectedNoteId];
 
       await executeQuery(db, updateSql, updateParams);
+      console.log('[PWA-BACKLINKS] ✓ Note updated');
+
+      // Parse wikilinks from note body
+      const wikilinks = extractWikiLinks(editBody || '');
+      console.log('[PWA-BACKLINKS] Extracted wikilinks:', wikilinks);
+      console.log('[PWA-BACKLINKS] Wikilinks count:', wikilinks.length);
+
+      // Check if foreign keys are enabled
+      const fkCheckResult = await executeQuery(db, 'PRAGMA foreign_keys', []);
+      console.log('[PWA-BACKLINKS] Foreign keys enabled:', fkCheckResult.rows[0]?.values[0]?.value);
+
+      // Delete old backlinks for this note
+      console.log('[PWA-BACKLINKS] Deleting old backlinks for:', selectedNoteId);
+      const deleteResult = await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+      console.log('[PWA-BACKLINKS] ✓ Deleted old backlinks');
+
+      // Insert new backlinks
+      for (const targetNoteId of wikilinks) {
+        console.log('[PWA-BACKLINKS] Attempting to insert backlink:', selectedNoteId, '→', targetNoteId);
+
+        try {
+          await executeQuery(
+            db,
+            'INSERT OR REPLACE INTO backlinks (source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?)',
+            [selectedNoteId, targetNoteId, '', now]
+          );
+          console.log('[PWA-BACKLINKS] ✓ Created backlink:', selectedNoteId, '→', targetNoteId);
+        } catch (insertErr) {
+          console.error('[PWA-BACKLINKS] ✗ Failed to insert backlink:', insertErr);
+          console.error('[PWA-BACKLINKS] Insert params:', { selectedNoteId, targetNoteId, now });
+        }
+      }
+
+      // Verify backlinks were created
+      const verifyResult = await executeQuery(
+        db,
+        'SELECT COUNT(*) as count FROM backlinks WHERE source_note_id = ?',
+        [selectedNoteId]
+      );
+      const backlinkCount = verifyResult.rows[0]?.values[0]?.value || 0;
+      console.log('[PWA-BACKLINKS] Backlinks in DB after insert:', backlinkCount);
+
+      // Process tags
+      console.log('[PWA-TAGS] ===== PROCESSING TAGS =====');
+      console.log('[PWA-TAGS] Tags input:', editTags);
+
+      // Parse tags from input (comma-separated)
+      const tagLabels = editTags
+        .split(',')
+        .map(t => t.trim().toLowerCase())
+        .filter(t => t.length > 0);
+      console.log('[PWA-TAGS] Parsed tags:', tagLabels);
+
+      // Delete old note_tags entries for this note
+      await executeQuery(db, 'DELETE FROM note_tags WHERE note_id = ?', [selectedNoteId]);
+      console.log('[PWA-TAGS] ✓ Deleted old note_tags');
+
+      // Insert or get tags, then link to note
+      for (const label of tagLabels) {
+        try {
+          // Check if tag exists
+          const tagCheckResult = await executeQuery(
+            db,
+            'SELECT tag_id FROM tags WHERE label = ?',
+            [label]
+          );
+
+          let tagId: string;
+          if (tagCheckResult.rows.length > 0) {
+            tagId = tagCheckResult.rows[0].values[0].value;
+            console.log('[PWA-TAGS] Tag exists:', label, '→', tagId);
+          } else {
+            // Create new tag
+            tagId = `tag_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            await executeQuery(
+              db,
+              'INSERT INTO tags (tag_id, label, created_at) VALUES (?, ?, ?)',
+              [tagId, label, now]
+            );
+            console.log('[PWA-TAGS] ✓ Created tag:', label, '→', tagId);
+          }
+
+          // Link tag to note
+          await executeQuery(
+            db,
+            'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)',
+            [selectedNoteId, tagId]
+          );
+          console.log('[PWA-TAGS] ✓ Linked tag to note:', label);
+        } catch (tagErr) {
+          console.error('[PWA-TAGS] ✗ Failed to process tag:', label, tagErr);
+        }
+      }
+
+      // Verify tags were linked
+      const tagVerifyResult = await executeQuery(
+        db,
+        'SELECT COUNT(*) FROM note_tags WHERE note_id = ?',
+        [selectedNoteId]
+      );
+      const tagCount = tagVerifyResult.rows[0]?.values[0]?.value || 0;
+      console.log('[PWA-TAGS] Tags linked to note:', tagCount);
+
+      console.log('[PWA-TAGS] ===== TAGS PROCESSING COMPLETE =====');
 
       await syncIfLeader(db);
+      console.log('[PWA-BACKLINKS] ✓ Synced to IndexedDB (if leader)');
+
       setError(null);
       await loadNotes(db);
+
+      // Reload backlinks and tags for current note
+      if (selectedNoteId) {
+        await loadBacklinks(db, selectedNoteId);
+        await loadNoteTags(db, selectedNoteId);
+      }
+
+      console.log('[PWA-BACKLINKS] ===== SAVE COMPLETE =====');
+
+      // Switch to preview mode to show rendered wikilinks
+      setViewMode('preview');
+      console.log('[PWA-WIKILINK] Switched to preview mode after save');
 
       // Notify other tabs with the SQL to execute
       broadcastDataChange(updateSql, updateParams, 'update-note');
@@ -1485,6 +1868,11 @@ export default function HomePage(): JSX.Element {
 
   const selectedNote = notes.find(n => n.note_id === selectedNoteId);
 
+  // Filter notes by tag if a filter is active
+  const displayedNotes = filterTagLabel
+    ? notes.filter(note => note.tags?.some(tag => tag.label === filterTagLabel))
+    : notes;
+
   return (
     <div
       className="min-h-screen bg-gray-100 flex flex-col"
@@ -1805,12 +2193,30 @@ export default function HomePage(): JSX.Element {
               </div>
             </div>
 
+            {/* Tag Filter Badge */}
+            {filterTagLabel && (
+              <div className="mb-2 flex items-center gap-2 p-2 bg-purple-50 rounded border border-purple-200">
+                <span className="text-xs font-medium text-purple-800">
+                  Filtering by: {filterTagLabel}
+                </span>
+                <button
+                  data-testid="clear-tag-filter"
+                  onClick={handleClearTagFilter}
+                  className="ml-auto px-2 py-0.5 text-xs bg-purple-600 text-white rounded hover:bg-purple-700"
+                >
+                  Clear
+                </button>
+              </div>
+            )}
+
             {/* Notes List */}
-            {notes.length === 0 ? (
-              <p className="text-sm text-gray-500 text-center py-4">No notes yet</p>
+            {displayedNotes.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4">
+                {filterTagLabel ? 'No notes with this tag' : 'No notes yet'}
+              </p>
             ) : (
               <div className="space-y-1">
-                {notes.map((note) => (
+                {displayedNotes.map((note) => (
                   <div
                     key={note.note_id}
                     data-testid="note-item"
@@ -1843,6 +2249,24 @@ export default function HomePage(): JSX.Element {
                       <p className="text-xs text-gray-600 mt-1 line-clamp-2">
                         {note.body}
                       </p>
+                    )}
+                    {/* Tag badges */}
+                    {note.tags && note.tags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {note.tags.map((tag) => (
+                          <span
+                            key={tag.tag_id}
+                            data-testid="note-tag-badge"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleTagFilterClick(tag.label);
+                            }}
+                            className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 cursor-pointer"
+                          >
+                            {tag.label}
+                          </span>
+                        ))}
+                      </div>
                     )}
                     <button
                       data-testid="delete-note-button"
@@ -1895,22 +2319,91 @@ export default function HomePage(): JSX.Element {
                       className="w-full px-4 py-2 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Note title..."
                     />
+                    {/* Hidden element for tests to read current note title */}
+                    <span data-testid="note-title-display" className="hidden">{editTitle}</span>
                   </div>
 
-                  {/* Body Textarea */}
+                  {/* Body Edit/Preview Section */}
                   <div>
-                    <label htmlFor="edit-body" className="block text-sm font-medium text-gray-700 mb-2">
-                      Content
+                    <div className="flex items-center justify-between mb-2">
+                      <label htmlFor="edit-body" className="block text-sm font-medium text-gray-700">
+                        Content
+                      </label>
+                      <div className="flex gap-2">
+                        <button
+                          data-testid="toggle-edit-mode"
+                          onClick={() => setViewMode('edit')}
+                          className={`px-3 py-1 text-xs font-medium rounded ${
+                            viewMode === 'edit'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          data-testid="toggle-preview-mode"
+                          onClick={() => setViewMode('preview')}
+                          className={`px-3 py-1 text-xs font-medium rounded ${
+                            viewMode === 'preview'
+                              ? 'bg-blue-600 text-white'
+                              : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                          }`}
+                        >
+                          Preview
+                        </button>
+                      </div>
+                    </div>
+
+                    {viewMode === 'edit' ? (
+                      <textarea
+                        id="edit-body"
+                        data-testid="note-body-textarea"
+                        value={editBody}
+                        onChange={(e) => setEditBody(e.target.value)}
+                        rows={20}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                        placeholder="Write your note content here..."
+                      />
+                    ) : (
+                      <div
+                        data-testid="note-preview"
+                        className="w-full min-h-[480px] px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
+                      >
+                        {renderNotePreview(editBody)}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Tags Input */}
+                  <div>
+                    <label htmlFor="edit-tags" className="block text-sm font-medium text-gray-700 mb-2">
+                      Tags (comma-separated)
                     </label>
-                    <textarea
-                      id="edit-body"
-                      data-testid="editor-note-body"
-                      value={editBody}
-                      onChange={(e) => setEditBody(e.target.value)}
-                      rows={20}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                      placeholder="Write your note content here..."
+                    <input
+                      id="edit-tags"
+                      type="text"
+                      data-testid="note-tags-input"
+                      value={editTags}
+                      onChange={(e) => setEditTags(e.target.value)}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., javascript, tutorial, backend"
                     />
+                    {/* Display current tags as badges */}
+                    {noteTags.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {noteTags.map((tag) => (
+                          <span
+                            key={tag.tag_id}
+                            data-testid="note-tag"
+                            onClick={() => handleTagFilterClick(tag.label)}
+                            className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer"
+                          >
+                            {tag.label}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* Action Buttons */}
@@ -1928,6 +2421,9 @@ export default function HomePage(): JSX.Element {
                         setSelectedNoteId(null);
                         setEditTitle('');
                         setEditBody('');
+                        setEditTags('');
+                        setNoteTags([]);
+                        setViewMode('preview');
                       }}
                       className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
                     >
@@ -2007,6 +2503,35 @@ export default function HomePage(): JSX.Element {
               </div>
             </div>
           )}
+
+          {/* BACKLINKS PANEL */}
+          <div data-testid="backlinks-panel" className="mt-6 pt-6 border-t border-gray-300">
+            <h2 className="text-sm font-bold text-gray-700 uppercase mb-3">Backlinks</h2>
+
+            {!selectedNote ? (
+              <p className="text-sm text-gray-500">Select a note to view backlinks</p>
+            ) : backlinks.length === 0 ? (
+              <p className="text-sm text-gray-500">No notes link to this note</p>
+            ) : (
+              <div className="space-y-2">
+                {backlinks.map((backlink) => (
+                  <div
+                    key={`${backlink.source_note_id}-${backlink.target_note_id}`}
+                    data-testid="backlink-item"
+                    onClick={() => handleBacklinkClick(backlink)}
+                    className="p-3 bg-gray-50 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors border border-gray-200"
+                  >
+                    <h4 className="text-sm font-semibold text-blue-600 hover:text-blue-800 mb-1">
+                      {backlink.source_note_title || backlink.source_note_id}
+                    </h4>
+                    <p className="text-xs text-gray-500">
+                      {new Date(backlink.created_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </aside>
 
       </div>
