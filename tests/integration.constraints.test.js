@@ -22,7 +22,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
     console.log('[TEST] Starting UNIQUE constraint tests...');
 
     // Initialize WASM
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
     console.log('[TEST] ✓ WASM initialized');
@@ -83,7 +83,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
   test('Test PRIMARY KEY constraint violations', async () => {
     console.log('[TEST] Starting PRIMARY KEY constraint tests...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -136,7 +136,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
   test('Test composite PRIMARY KEY constraint (note_tags)', async () => {
     console.log('[TEST] Starting composite PRIMARY KEY constraint tests...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -226,7 +226,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
   test('Test FOREIGN KEY constraint violations', async () => {
     console.log('[TEST] Starting FOREIGN KEY constraint tests...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -274,7 +274,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
   test('Test NOT NULL constraint violations', async () => {
     console.log('[TEST] Starting NOT NULL constraint tests...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -309,7 +309,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
   test('Test data integrity across related tables', async () => {
     console.log('[TEST] Starting data integrity tests across related tables...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -379,7 +379,7 @@ describe('INTEGRATION: Database constraints with real absurder-sql', () => {
   test('Test constraint enforcement with PRAGMA foreign_keys', async () => {
     console.log('[TEST] Starting PRAGMA foreign_keys enforcement test...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 

@@ -27,7 +27,7 @@ test('INTEGRATION: Export database to .db file format', async () => {
   // Load WASM for Node.js
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 
@@ -76,7 +76,7 @@ test('INTEGRATION: Import database from .db file format', async () => {
   // Load WASM for Node.js
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 
@@ -144,7 +144,7 @@ test('INTEGRATION: Export-Import round-trip preserves all data', async () => {
   // Load WASM for Node.js
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 

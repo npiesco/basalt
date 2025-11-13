@@ -108,7 +108,8 @@ No modifications to the AbsurderSQL source repo are required; everything below a
 ## Phase 5: Polish & Monetization (Weeks 25+)
 
 ### UI/UX Enhancements
-- [ ] Add theming (light/dark/custom), autosave indicators, undo/redo stack, and markdown preview panes.
+- [x] **Autosave Functionality with E2E Tests (2025-11-13)**: Fully implemented automatic note saving with comprehensive E2E test validation following strict TDD. Created E2E test suite (`tests/e2e/autosave.e2e.test.js`) with 7 tests validating: title autosave after 3-second debounce, body autosave after debounce, rapid typing with single final save, autosave when switching between notes, saving indicator display ("Saving..." → "Saved"), combined title+body autosave, no save when content unchanged. Features: 3-second debounce for autosave, autosave indicator in UI with visual states (blue "Saving...", green "Saved", gray "No changes"), proper absurder-sql save pattern (sync → close → reopen database), lastSavedContentRef for change detection, triggerAutosave() on all input changes, performAutosave() executes complete save cycle with proper database reference updates. Implementation uses proper absurder-sql save pattern instead of hacky workarounds - critical for IndexedDB persistence. Fixed Playwright config browser crash issue by removing '--single-process' flag. All 7 tests PASS with full isolation. NO MOCKS - real autosave with 3-second debounce, real absurder-sql database persistence, real IndexedDB. (See apps/pwa/app/page.tsx:110-113,1268-1410,2672-2677,2720-2725,2771-2783, tests/e2e/autosave.e2e.test.js, playwright.config.js)
+- [ ] Add theming (light/dark/custom), undo/redo stack, and markdown preview panes.
 - [ ] Optimize performance for large vaults (virtualized lists, chunked loading, cache tuning).
 
 ### Plugin System (Optional)

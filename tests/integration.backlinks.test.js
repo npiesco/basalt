@@ -28,7 +28,7 @@ describe('INTEGRATION: Backlinks and Graph functionality with real absurder-sql'
     console.log('[TEST] Starting backlinks and graph integration test...');
 
     // Initialize WASM
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 

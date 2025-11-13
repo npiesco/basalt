@@ -30,11 +30,12 @@ export default {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        '--single-process',
         '--disable-gpu'
       ]
     }
   },
+  // Force each test to use its own browser context with isolated storage
+  fullyParallel: false,
 
   projects: [
     {

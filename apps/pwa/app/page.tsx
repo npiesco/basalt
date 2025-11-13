@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initBasaltDb } from '../lib/db/client';
 import cytoscape from 'cytoscape';
 import { marked } from 'marked';
+import CodeMirrorEditor from './components/CodeMirrorEditor';
 
 interface Note {
   note_id: string;
@@ -40,6 +41,7 @@ interface Tag {
 export default function HomePage(): JSX.Element {
   const [db, setDb] = useState<any>(null);
   const dbRef = useRef<any>(null);
+  const dbNameRef = useRef<string>('basalt-vault-main'); // Store database name for reopen
   const [notes, setNotes] = useState<Note[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [isReady, setIsReady] = useState(false);
@@ -106,6 +108,12 @@ export default function HomePage(): JSX.Element {
   const [isGraphViewOpen, setIsGraphViewOpen] = useState(false);
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<any>(null); // Cytoscape instance
+
+  // Autosave state
+  const [autosaveStatus, setAutosaveStatus] = useState<'' | 'Saving...' | 'Saved' | 'No changes'>('');
+  const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
+  const currentContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
 
   // Initialize database on mount
   useEffect(() => {
@@ -1087,7 +1095,23 @@ export default function HomePage(): JSX.Element {
     }
   }
 
-  function handleSelectNote(note: Note) {
+  async function handleSelectNote(note: Note) {
+    // Trigger immediate autosave of current note before switching
+    if (selectedNoteId && db) {
+      // Cancel any pending autosave timer
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      // Perform immediate autosave
+      await performAutosave();
+    }
+
+    // Set the last saved content IMMEDIATELY before changing state
+    lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+    currentContentRef.current = { title: note.title, body: note.body || '' };
+    console.log('[AUTOSAVE] Set lastSavedContentRef for note:', note.note_id, lastSavedContentRef.current);
+
     setSelectedNoteId(note.note_id);
     setEditTitle(note.title);
     setEditBody(note.body || '');
@@ -1145,8 +1169,6 @@ export default function HomePage(): JSX.Element {
       return <p className="text-gray-400 italic">No content</p>;
     }
 
-    console.log('[PWA-MARKDOWN] Rendering preview for body:', body.substring(0, 100));
-
     // STEP 1: Extract wikilinks and replace with placeholders
     // Use {{}} to avoid markdown interpreting __ as bold/italic
     const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
@@ -1155,11 +1177,11 @@ export default function HomePage(): JSX.Element {
 
     const bodyWithPlaceholders = body.replace(WIKILINK_PATTERN, (match, noteId) => {
       const targetNoteId = noteId.trim();
+      // Find note by exact ID match
       const targetNote = notes.find(n => n.note_id === targetNoteId);
       const placeholder = `{{WIKILINK_${wikilinkIndex}}}`;
       wikilinks.push({ id: targetNoteId, note: targetNote || null });
       wikilinkIndex++;
-      console.log('[PWA-MARKDOWN] Found wikilink to:', targetNoteId, '→ placeholder:', placeholder);
       return placeholder;
     });
 
@@ -1170,8 +1192,6 @@ export default function HomePage(): JSX.Element {
     });
 
     const htmlContent = marked.parse(bodyWithPlaceholders) as string;
-    console.log('[PWA-MARKDOWN] Parsed markdown to HTML, wikilinks found:', wikilinks.length);
-    console.log('[PWA-MARKDOWN] HTML content preview:', htmlContent.substring(0, 300));
 
     // STEP 3: Replace placeholders with React wikilink components
     // Split HTML by placeholder tokens and rebuild with React components
@@ -1210,7 +1230,6 @@ export default function HomePage(): JSX.Element {
             {wikilink.note.title}
           </span>
         );
-        console.log('[PWA-MARKDOWN] Rendered valid wikilink:', wikilink.note.title);
       } else {
         // Broken wikilink
         parts.push(
@@ -1222,7 +1241,6 @@ export default function HomePage(): JSX.Element {
             {wikilink.id}
           </span>
         );
-        console.log('[PWA-MARKDOWN] Rendered broken wikilink:', wikilink.id);
       }
 
       lastIndex = match.index + match[0].length;
@@ -1239,8 +1257,6 @@ export default function HomePage(): JSX.Element {
       );
     }
 
-    console.log('[PWA-MARKDOWN] Rendered', parts.length, 'parts,', replacementCount, 'wikilink placeholders replaced');
-
     // Wrap in a container with markdown styling
     return (
       <div className="prose prose-sm max-w-none">
@@ -1248,6 +1264,172 @@ export default function HomePage(): JSX.Element {
       </div>
     );
   }
+
+  // Autosave function - performs the actual save using proper absurder-sql pattern
+  async function performAutosave() {
+    const currentTitle = currentContentRef.current.title;
+    const currentBody = currentContentRef.current.body;
+
+    if (!db || !selectedNoteId || !currentTitle.trim()) {
+      return;
+    }
+
+    // Check if content has actually changed
+    if (currentTitle === lastSavedContentRef.current.title &&
+        currentBody === lastSavedContentRef.current.body) {
+      setAutosaveStatus('No changes');
+      return;
+    }
+
+    try {
+      setAutosaveStatus('Saving...');
+
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const { extractWikiLinks } = await import('../../../packages/domain/src/markdown.js');
+      const now = new Date().toISOString();
+
+      // Update note
+      const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
+      const updateParams = [currentTitle, currentBody, now, selectedNoteId];
+      await executeQuery(db, updateSql, updateParams);
+
+      // Parse wikilinks from note body
+      const wikilinks = extractWikiLinks(currentBody || '');
+
+      // Delete old backlinks for this note
+      await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+
+      // Insert new backlinks
+      for (const targetNoteId of wikilinks) {
+        try {
+          await executeQuery(
+            db,
+            'INSERT INTO backlinks (source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?)',
+            [selectedNoteId, targetNoteId, '', now]
+          );
+        } catch (err: any) {
+          // Ignore foreign key violations for non-existent target notes
+          if (!err.message?.includes('FOREIGN KEY constraint failed')) {
+            throw err;
+          }
+        }
+      }
+
+      // Handle tags
+      const tagsArray = editTags.split(',').map((t: string) => t.trim()).filter(Boolean);
+      await executeQuery(db, 'DELETE FROM note_tags WHERE note_id = ?', [selectedNoteId]);
+
+      for (const tagLabel of tagsArray) {
+        const tagLower = tagLabel.toLowerCase();
+        let tagId: string;
+
+        const existingTag = await executeQuery(db, 'SELECT tag_id FROM tags WHERE LOWER(label) = ?', [tagLower]);
+        if (existingTag.rows.length > 0) {
+          tagId = existingTag.rows[0].values[0].value as string;
+        } else {
+          tagId = `tag_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          await executeQuery(db, 'INSERT INTO tags (tag_id, label, created_at) VALUES (?, ?, ?)', [tagId, tagLabel, now]);
+        }
+
+        await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [selectedNoteId, tagId]);
+      }
+
+      // PROPER ABSURDER-SQL SAVE PATTERN: sync → close → reopen
+      try {
+        console.log('[AUTOSAVE] Step 1: Syncing to IndexedDB...');
+        await db.sync();
+        console.log('[AUTOSAVE] ✓ Step 1 complete');
+      } catch (syncErr: any) {
+        console.error('[AUTOSAVE] ERROR in Step 1 (sync):', syncErr);
+        throw syncErr;
+      }
+
+      try {
+        console.log('[AUTOSAVE] Step 2: Closing database...');
+        await db.close();
+        console.log('[AUTOSAVE] ✓ Step 2 complete');
+      } catch (closeErr: any) {
+        console.error('[AUTOSAVE] ERROR in Step 2 (close):', closeErr);
+        throw closeErr;
+      }
+
+      let newDb;
+      try {
+        console.log('[AUTOSAVE] Step 3: Reopening database with name:', dbNameRef.current);
+        const { Database } = await import('@npiesco/absurder-sql');
+        newDb = await Database.newDatabase(dbNameRef.current);
+        console.log('[AUTOSAVE] ✓ Step 3 complete - database reopened');
+
+        // Update db reference
+        setDb(newDb);
+        dbRef.current = newDb;
+
+        // Expose on window for E2E tests
+        if (typeof window !== 'undefined') {
+          (window as any).basaltDb = newDb;
+        }
+
+        console.log('[AUTOSAVE] ✓ All database references updated');
+      } catch (reopenErr: any) {
+        console.error('[AUTOSAVE] ERROR in Step 3 (reopen):', reopenErr);
+        throw reopenErr;
+      }
+
+      // Update last saved content
+      lastSavedContentRef.current = { title: currentTitle, body: currentBody };
+
+      console.log('[AUTOSAVE] Save completed successfully');
+      setAutosaveStatus('Saved');
+
+      // Reload notes to reflect changes - use newDb directly instead of state
+      await loadNotes(newDb);
+      await loadBacklinks();
+
+      // Clear "Saved" message after 2 seconds
+      setTimeout(() => {
+        setAutosaveStatus('');
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('[PWA-AUTOSAVE] Autosave failed:', err);
+      setAutosaveStatus('');
+    }
+  }
+
+  // Debounced autosave trigger - cancels previous timer and starts new one
+  function triggerAutosave() {
+    // Clear any existing timer
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    // Show "Saving..." immediately to give user feedback
+    setAutosaveStatus('Saving...');
+
+    // Set new timer for 3 seconds
+    autosaveTimerRef.current = setTimeout(() => {
+      performAutosave();
+    }, 3000);
+  }
+
+  // Cleanup autosave timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Update last saved ref when a new note is selected (not when editing)
+  useEffect(() => {
+    if (selectedNoteId && editTitle && !autosaveTimerRef.current) {
+      // Only update if we just opened the note (no pending autosave)
+      lastSavedContentRef.current = { title: editTitle, body: editBody };
+      setAutosaveStatus('');
+    }
+  }, [selectedNoteId]);
 
   async function handleSaveEdit() {
     if (!db || !selectedNoteId || !editTitle.trim()) {
@@ -1523,11 +1705,26 @@ export default function HomePage(): JSX.Element {
     return () => clearTimeout(timer);
   }, [searchQuery, db]);
 
-  function handleSearchResultClick(note: Note) {
+  async function handleSearchResultClick(note: Note) {
+    // Trigger immediate autosave of current note before switching
+    if (selectedNoteId && db) {
+      // Cancel any pending autosave timer
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      // Perform immediate autosave
+      await performAutosave();
+    }
+
+    // Set the last saved content IMMEDIATELY before changing state
+    lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+
     setSelectedNoteId(note.note_id);
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
+
     // Optionally clear search
     // setSearchQuery('');
   }
@@ -2447,6 +2644,7 @@ export default function HomePage(): JSX.Element {
                   <div
                     key={note.note_id}
                     data-testid="note-item"
+                    data-note-id={note.note_id}
                     data-selected={selectedNoteIds.has(note.note_id) ? 'true' : 'false'}
                     draggable={true}
                     onDragStart={(e) => handleNoteDragStart(note, e)}
@@ -2540,9 +2738,13 @@ export default function HomePage(): JSX.Element {
                     <input
                       id="edit-title"
                       type="text"
-                      data-testid="editor-note-title"
+                      data-testid="edit-title-input"
                       value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
+                      onChange={(e) => {
+                        setEditTitle(e.target.value);
+                        currentContentRef.current.title = e.target.value;
+                        triggerAutosave();
+                      }}
                       className="w-full px-4 py-2 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Note title..."
                     />
@@ -2583,15 +2785,21 @@ export default function HomePage(): JSX.Element {
                     </div>
 
                     {viewMode === 'edit' ? (
-                      <textarea
-                        id="edit-body"
-                        data-testid="note-body-textarea"
-                        value={editBody}
-                        onChange={(e) => setEditBody(e.target.value)}
-                        rows={20}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
-                        placeholder="Write your note content here..."
-                      />
+                      <div
+                        data-testid="edit-body-textarea"
+                        className="w-full border border-gray-300 rounded-lg overflow-hidden"
+                        style={{ minHeight: '480px' }}
+                      >
+                        <CodeMirrorEditor
+                          value={editBody}
+                          onChange={(newValue) => {
+                            setEditBody(newValue);
+                            currentContentRef.current.body = newValue;
+                            triggerAutosave();
+                          }}
+                          className="w-full h-full"
+                        />
+                      </div>
                     ) : (
                       <div
                         data-testid="note-preview"
@@ -2633,6 +2841,20 @@ export default function HomePage(): JSX.Element {
                     )}
                   </div>
 
+                  {/* Autosave Indicator */}
+                  {autosaveStatus && (
+                    <div
+                      data-testid="autosave-indicator"
+                      className={`text-sm font-medium px-3 py-1 rounded ${
+                        autosaveStatus === 'Saving...' ? 'text-blue-600 bg-blue-50' :
+                        autosaveStatus === 'Saved' ? 'text-green-600 bg-green-50' :
+                        'text-gray-600 bg-gray-50'
+                      }`}
+                    >
+                      {autosaveStatus}
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex gap-4">
                     <button
@@ -2643,14 +2865,26 @@ export default function HomePage(): JSX.Element {
                       Save Changes
                     </button>
                     <button
-                      data-testid="cancel-edit-button"
-                      onClick={() => {
+                      data-testid="close-note-btn"
+                      onClick={async () => {
+                        // Trigger immediate autosave before closing
+                        if (selectedNoteId && db) {
+                          // Cancel any pending autosave timer
+                          if (autosaveTimerRef.current) {
+                            clearTimeout(autosaveTimerRef.current);
+                            autosaveTimerRef.current = null;
+                          }
+                          // Perform immediate autosave
+                          await performAutosave();
+                        }
+
                         setSelectedNoteId(null);
                         setEditTitle('');
                         setEditBody('');
                         setEditTags('');
                         setNoteTags([]);
                         setViewMode('preview');
+                        setAutosaveStatus('');
                       }}
                       className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
                     >
