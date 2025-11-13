@@ -14,12 +14,24 @@ const { test, expect } = require('@playwright/test');
  */
 
 test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('http://localhost:3000');
+    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 });
+
+    // Clear database before each test for isolation
+    await page.evaluate(async () => {
+      await window.basaltDb.clearDatabase();
+    });
+    console.log('[TEST] Database cleared, reloading page for clean state');
+
+    // Reload page to ensure clean state after database clear
+    await page.reload();
+    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 });
+    await page.waitForTimeout(500); // Extra wait for UI to stabilize
+  });
+
   test('Parse wikilinks when saving note and store in backlinks table', async ({ page }) => {
     console.log('[E2E] Starting wikilink parsing test');
-
-    await page.goto('http://localhost:3000');
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });
-    console.log('[E2E] ✓ App loaded');
 
     // Create note-1 (target note)
     const note1Title = `Meeting Notes ${Date.now()}`;
@@ -76,9 +88,6 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
   test('Display backlinks panel showing notes that reference current note', async ({ page }) => {
     console.log('[E2E] Starting backlinks panel display test');
-
-    await page.goto('http://localhost:3000');
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });
 
     // Create note-1 (target)
     const note1Title = `Architecture Doc ${Date.now()}`;
@@ -147,9 +156,6 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
   test('Click backlink to navigate to referring note', async ({ page }) => {
     console.log('[E2E] Starting backlink navigation test');
 
-    await page.goto('http://localhost:3000');
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });
-
     // Create note-A (target)
     const noteATitle = `Core Concept ${Date.now()}`;
     await page.locator('[data-testid="note-title-input"]').fill(noteATitle);
@@ -198,9 +204,6 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
   test('Update note body to add new wikilinks', async ({ page }) => {
     console.log('[E2E] Starting wikilink update test');
-
-    await page.goto('http://localhost:3000');
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });
 
     // Create two target notes
     const targetTitle1 = `Target One ${Date.now()}`;
@@ -282,9 +285,6 @@ test.describe('INTEGRATION: Wikilinks and Backlinks', () => {
 
   test('Delete note removes its backlinks from database', async ({ page }) => {
     console.log('[E2E] Starting backlink deletion test');
-
-    await page.goto('http://localhost:3000');
-    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });
 
     // Create target note
     const targetTitle = `Delete Target ${Date.now()}`;

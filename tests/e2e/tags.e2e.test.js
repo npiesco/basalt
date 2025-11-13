@@ -4,6 +4,17 @@ test.describe('INTEGRATION: Tags and Metadata', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('http://localhost:3000');
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 });
+
+    // Clear database before each test for isolation
+    await page.evaluate(async () => {
+      await window.basaltDb.clearDatabase();
+    });
+    console.log('[TEST] Database cleared, reloading page for clean state');
+
+    // Reload page to ensure clean state after database clear
+    await page.reload();
+    await page.waitForSelector('[data-testid="app-ready"]', { timeout: 15000 });
+    await page.waitForTimeout(500); // Extra wait for UI to stabilize
   });
 
   test('Add tags to a note and persist to database', async ({ page }) => {
