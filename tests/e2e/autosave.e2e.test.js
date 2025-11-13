@@ -6,12 +6,22 @@
 const { test, expect } = require('@playwright/test');
 
 test.describe('Autosave Functionality', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, context }) => {
+    // Force new context storage for each test
+    await context.clearCookies();
+    await context.clearPermissions();
+
     // Navigate to the app
     await page.goto('http://localhost:3000');
 
     // Wait for database to initialize
     await page.waitForSelector('[data-testid="app-ready"]', { timeout: 10000 });
+  });
+
+  test.afterEach(async ({ page }) => {
+    // Wait significantly longer for autosave operations and database to fully settle
+    // The sync→close→reopen pattern needs time to complete before next test
+    await page.waitForTimeout(3000);
   });
 
   test('should autosave title changes after debounce delay', async ({ page }) => {
@@ -50,13 +60,14 @@ test.describe('Autosave Functionality', () => {
   });
 
   test('should autosave body changes after debounce delay', async ({ page }) => {
-    // Create a note
-    await page.fill('[data-testid="note-title-input"]', 'Body Test');
+    // Create a note with unique title
+    const uniqueTitle = `Body Test ${Date.now()}`;
+    await page.fill('[data-testid="note-title-input"]', uniqueTitle);
     await page.click('[data-testid="new-note-button"]');
-    await page.waitForSelector('[data-testid="note-item"]');
+    await page.waitForSelector(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
 
-    // Click to edit
-    await page.click('[data-testid="note-item"]');
+    // Click to edit the specific note
+    await page.click(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
 
     // Type in body (use pressSequentially to trigger onChange properly)
@@ -72,8 +83,8 @@ test.describe('Autosave Functionality', () => {
     // Close WITHOUT manual save
     await page.click('[data-testid="close-note-btn"]');
 
-    // Reopen and verify persistence
-    await page.click('[data-testid="note-item"]');
+    // Reopen the specific note and verify persistence
+    await page.click(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
     const bodyTextarea = page.locator('[data-testid="edit-body-textarea"]');
     await expect(bodyTextarea).toHaveValue('This content should be autosaved automatically.');
@@ -116,29 +127,31 @@ test.describe('Autosave Functionality', () => {
   });
 
   test('should autosave when switching between notes', async ({ page }) => {
-    // Create two notes
-    await page.fill('[data-testid="note-title-input"]', 'Note One');
-    await page.click('[data-testid="new-note-button"]');
-    await page.waitForTimeout(500);
+    // Create two notes with unique titles
+    const noteOneTitle = `Note One ${Date.now()}`;
+    const noteTwoTitle = `Note Two ${Date.now() + 1}`;
 
-    await page.fill('[data-testid="note-title-input"]', 'Note Two');
+    await page.fill('[data-testid="note-title-input"]', noteOneTitle);
     await page.click('[data-testid="new-note-button"]');
-    await page.waitForTimeout(500);
+    await page.waitForSelector(`[data-testid="note-item"]:has-text("${noteOneTitle}")`);
+
+    await page.fill('[data-testid="note-title-input"]', noteTwoTitle);
+    await page.click('[data-testid="new-note-button"]');
+    await page.waitForSelector(`[data-testid="note-item"]:has-text("${noteTwoTitle}")`);
 
     // Edit first note
-    const notes = page.locator('[data-testid="note-item"]');
-    await notes.first().click();
+    await page.click(`[data-testid="note-item"]:has-text("${noteOneTitle}")`);
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
     await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Content for note one', { delay: 20 });
 
     // Immediately switch to second note (should trigger autosave)
-    await notes.last().click();
+    await page.click(`[data-testid="note-item"]:has-text("${noteTwoTitle}")`);
 
-    // Wait a moment for the save to complete
-    await page.waitForTimeout(1000);
+    // Wait for autosave to complete (sync+close+reopen takes time)
+    await page.waitForTimeout(2000);
 
     // Switch back to first note and verify content was saved
-    await notes.first().click();
+    await page.click(`[data-testid="note-item"]:has-text("${noteOneTitle}")`);
     await page.waitForSelector('[data-testid="edit-body-textarea"]');
     const bodyTextarea = page.locator('[data-testid="edit-body-textarea"]');
     await expect(bodyTextarea).toHaveValue('Content for note one');
@@ -168,13 +181,14 @@ test.describe('Autosave Functionality', () => {
   });
 
   test('should autosave both title and body changes together', async ({ page }) => {
-    // Create a note
-    await page.fill('[data-testid="note-title-input"]', 'Combined Test');
+    // Create a note with unique title
+    const uniqueTitle = `Combined Test ${Date.now()}`;
+    await page.fill('[data-testid="note-title-input"]', uniqueTitle);
     await page.click('[data-testid="new-note-button"]');
-    await page.waitForSelector('[data-testid="note-item"]');
+    await page.waitForSelector(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
 
-    // Click to edit
-    await page.click('[data-testid="note-item"]');
+    // Click to edit the specific note
+    await page.click(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
     await page.waitForSelector('[data-testid="edit-title-input"]');
 
     // Change both title and body (use pressSequentially to trigger onChange properly)
@@ -191,7 +205,7 @@ test.describe('Autosave Functionality', () => {
 
     // Close and reopen to verify both changes persisted
     await page.click('[data-testid="close-note-btn"]');
-    await page.click('[data-testid="note-item"]');
+    await page.click('[data-testid="note-item"]:has-text("Updated Title")');
     await page.waitForSelector('[data-testid="edit-title-input"]');
 
     const titleInput = page.locator('[data-testid="edit-title-input"]');
