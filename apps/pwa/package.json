@@ -11,12 +11,14 @@
   "dependencies": {
     "@npiesco/absurder-sql": "^0.1.15",
     "cytoscape": "^3.33.1",
+    "marked": "^17.0.0",
     "next": "^16.0.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.17",
+    "@tailwindcss/typography": "^0.5.19",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

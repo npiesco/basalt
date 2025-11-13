@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initBasaltDb } from '../lib/db/client';
 import cytoscape from 'cytoscape';
+import { marked } from 'marked';
 
 interface Note {
   note_id: string;
@@ -1144,66 +1145,106 @@ export default function HomePage(): JSX.Element {
       return <p className="text-gray-400 italic">No content</p>;
     }
 
-    // Parse wikilinks using regex: [[note_id]]
+    console.log('[PWA-MARKDOWN] Rendering preview for body:', body.substring(0, 100));
+
+    // STEP 1: Extract wikilinks and replace with placeholders
+    // Use {{}} to avoid markdown interpreting __ as bold/italic
     const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
+    const wikilinks: Array<{ id: string; note: Note | null }> = [];
+    let wikilinkIndex = 0;
+
+    const bodyWithPlaceholders = body.replace(WIKILINK_PATTERN, (match, noteId) => {
+      const targetNoteId = noteId.trim();
+      const targetNote = notes.find(n => n.note_id === targetNoteId);
+      const placeholder = `{{WIKILINK_${wikilinkIndex}}}`;
+      wikilinks.push({ id: targetNoteId, note: targetNote || null });
+      wikilinkIndex++;
+      console.log('[PWA-MARKDOWN] Found wikilink to:', targetNoteId, '→ placeholder:', placeholder);
+      return placeholder;
+    });
+
+    // STEP 2: Parse markdown to HTML
+    marked.setOptions({
+      breaks: true, // Enable line breaks
+      gfm: true, // GitHub Flavored Markdown
+    });
+
+    const htmlContent = marked.parse(bodyWithPlaceholders) as string;
+    console.log('[PWA-MARKDOWN] Parsed markdown to HTML, wikilinks found:', wikilinks.length);
+    console.log('[PWA-MARKDOWN] HTML content preview:', htmlContent.substring(0, 300));
+
+    // STEP 3: Replace placeholders with React wikilink components
+    // Split HTML by placeholder tokens and rebuild with React components
     const parts: React.ReactNode[] = [];
+    const PLACEHOLDER_PATTERN = /\{\{WIKILINK_(\d+)\}\}/g;
     let lastIndex = 0;
     let match;
+    let replacementCount = 0;
 
-    console.log('[PWA-WIKILINK] Rendering preview for body:', body.substring(0, 100));
-
-    while ((match = WIKILINK_PATTERN.exec(body)) !== null) {
-      // Add text before the wikilink
+    while ((match = PLACEHOLDER_PATTERN.exec(htmlContent)) !== null) {
+      replacementCount++;
+      // Add HTML before the placeholder
       if (match.index > lastIndex) {
-        parts.push(body.substring(lastIndex, match.index));
+        const htmlSegment = htmlContent.substring(lastIndex, match.index);
+        parts.push(
+          <span
+            key={`html-${lastIndex}`}
+            dangerouslySetInnerHTML={{ __html: htmlSegment }}
+          />
+        );
       }
 
-      const targetNoteId = match[1].trim();
-      console.log('[PWA-WIKILINK] Found wikilink to:', targetNoteId);
+      // Add wikilink component
+      const wikilinkIdx = parseInt(match[1], 10);
+      const wikilink = wikilinks[wikilinkIdx];
 
-      // Look up the note to get its title
-      const targetNote = notes.find(n => n.note_id === targetNoteId);
-
-      if (targetNote) {
-        // Valid wikilink - render as clickable link
+      if (wikilink.note) {
+        // Valid wikilink
         parts.push(
           <span
-            key={`wikilink-${match.index}`}
+            key={`wikilink-${wikilinkIdx}`}
             data-testid="wikilink"
-            onClick={() => handleWikilinkClick(targetNoteId)}
+            onClick={() => handleWikilinkClick(wikilink.id)}
             className="inline-flex items-center px-2 py-0.5 rounded bg-blue-100 text-blue-800 hover:bg-blue-200 cursor-pointer font-medium"
           >
-            {targetNote.title}
+            {wikilink.note.title}
           </span>
         );
-        console.log('[PWA-WIKILINK] Rendered valid wikilink:', targetNote.title);
+        console.log('[PWA-MARKDOWN] Rendered valid wikilink:', wikilink.note.title);
       } else {
-        // Broken wikilink - render with red styling
+        // Broken wikilink
         parts.push(
           <span
-            key={`wikilink-broken-${match.index}`}
+            key={`wikilink-broken-${wikilinkIdx}`}
             data-testid="wikilink-broken"
             className="inline-flex items-center px-2 py-0.5 rounded bg-red-50 text-red-600 cursor-not-allowed font-medium border border-red-200"
           >
-            {targetNoteId}
+            {wikilink.id}
           </span>
         );
-        console.log('[PWA-WIKILINK] Rendered broken wikilink:', targetNoteId);
+        console.log('[PWA-MARKDOWN] Rendered broken wikilink:', wikilink.id);
       }
 
       lastIndex = match.index + match[0].length;
     }
 
-    // Add remaining text after last wikilink
-    if (lastIndex < body.length) {
-      parts.push(body.substring(lastIndex));
+    // Add remaining HTML after last placeholder
+    if (lastIndex < htmlContent.length) {
+      const htmlSegment = htmlContent.substring(lastIndex);
+      parts.push(
+        <span
+          key={`html-${lastIndex}`}
+          dangerouslySetInnerHTML={{ __html: htmlSegment }}
+        />
+      );
     }
 
-    console.log('[PWA-WIKILINK] Rendered', parts.length, 'parts');
+    console.log('[PWA-MARKDOWN] Rendered', parts.length, 'parts,', replacementCount, 'wikilink placeholders replaced');
 
+    // Wrap in a container with markdown styling
     return (
-      <div className="whitespace-pre-wrap font-mono text-sm">
-        {parts.length > 0 ? parts : body}
+      <div className="prose prose-sm max-w-none">
+        {parts}
       </div>
     );
   }
