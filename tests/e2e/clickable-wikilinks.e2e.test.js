@@ -33,10 +33,20 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(500);
 
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(sourceBody);
-    await page.locator('[data-testid="save-note-button"]').click();
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(sourceBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+
+    // Switch to preview mode to see rendered wikilinks
+    await page.locator('[data-testid="toggle-preview-mode"]').click();
     await page.waitForTimeout(1000);
 
     // Verify wikilinks are rendered as clickable elements in preview
@@ -80,21 +90,31 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(500);
 
     await page.locator(`[data-testid="note-item"]:has-text("${noteBTitle}")`).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(noteBBody);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(1000);
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(noteBBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
 
     // Verify we're viewing note B
-    await expect(page.locator('[data-testid="editor-note-title"]')).toHaveValue(noteBTitle);
+    await expect(page.locator('[data-testid="edit-title-input"]')).toHaveValue(noteBTitle);
+
+    // Switch to preview mode to see wikilink
+    await page.locator('[data-testid="toggle-preview-mode"]').click();
+    await page.waitForTimeout(1000);
 
     // Click the wikilink
     await page.locator('[data-testid="wikilink"]').first().click();
     await page.waitForTimeout(500);
 
     // Verify we navigated to note A
-    await expect(page.locator('[data-testid="editor-note-title"]')).toHaveValue(noteATitle);
+    await expect(page.locator('[data-testid="edit-title-input"]')).toHaveValue(noteATitle);
     console.log('[E2E] ✓✓✓ WIKILINK NAVIGATION WORKS!');
   });
 
@@ -110,10 +130,20 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(500);
 
     await page.locator(`[data-testid="note-item"]:has-text("${noteTitle}")`).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(noteBody);
-    await page.locator('[data-testid="save-note-button"]').click();
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(noteBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+
+    // Switch to preview mode to see broken wikilink
+    await page.locator('[data-testid="toggle-preview-mode"]').click();
     await page.waitForTimeout(1000);
 
     // Verify broken wikilink is rendered
@@ -180,10 +210,20 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(500);
 
     await page.locator(`[data-testid="note-item"]:has-text("${masterTitle}")`).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(masterBody);
-    await page.locator('[data-testid="save-note-button"]').click();
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(masterBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+
+    // Switch to preview mode to see wikilinks
+    await page.locator('[data-testid="toggle-preview-mode"]').click();
     await page.waitForTimeout(1000);
 
     // Verify all wikilinks are rendered (4 total: note1 twice, note2 once, note3 once)
@@ -196,7 +236,7 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(500);
 
     // Verify we navigated to note2
-    await expect(page.locator('[data-testid="editor-note-title"]')).toHaveValue(note2Title);
+    await expect(page.locator('[data-testid="edit-title-input"]')).toHaveValue(note2Title);
 
     console.log('[E2E] ✓✓✓ COMPLEX WIKILINKS WORK!');
   });
@@ -227,27 +267,41 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     await page.waitForTimeout(500);
 
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    await page.locator('[data-testid="note-body-textarea"]').fill(sourceBody);
-    await page.locator('[data-testid="save-note-button"]').click();
+    // Use CodeMirror editor - starts in edit mode
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(sourceBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+
+    // Should be in edit mode initially (CodeMirror editor visible)
+    await expect(page.locator('.cm-content')).toBeVisible();
+    await expect(page.locator('[data-testid="note-preview"]')).not.toBeVisible();
+
+    // Switch to preview mode
+    await page.locator('[data-testid="toggle-preview-mode"]').click();
     await page.waitForTimeout(1000);
 
-    // Should be in preview mode by default (showing rendered wikilinks)
+    // Should show preview now (wikilink rendered)
     await expect(page.locator('[data-testid="note-preview"]')).toBeVisible();
     await expect(page.locator('[data-testid="wikilink"]')).toBeVisible();
 
-    // Switch to edit mode
+    // Switch back to edit mode
     await page.locator('[data-testid="toggle-edit-mode"]').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    // Should show textarea, not preview
-    await expect(page.locator('[data-testid="note-body-textarea"]')).toBeVisible();
+    // Should show CodeMirror editor again, not preview
+    await expect(page.locator('.cm-content')).toBeVisible();
     await expect(page.locator('[data-testid="note-preview"]')).not.toBeVisible();
 
-    // Switch back to preview mode
+    // Switch to preview mode one more time
     await page.locator('[data-testid="toggle-preview-mode"]').click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
     // Should show preview again
     await expect(page.locator('[data-testid="note-preview"]')).toBeVisible();
