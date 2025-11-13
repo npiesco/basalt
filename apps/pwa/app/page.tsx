@@ -547,6 +547,7 @@ export default function HomePage(): JSX.Element {
 
       setNotes(noteList);
       console.log('[PWA] Loaded notes:', noteList.length);
+      console.log('[PWA] Note details:', noteList.map(n => ({ id: n.note_id, title: n.title, body: n.body?.substring(0, 50) })));
     } catch (err) {
       console.error('[PWA] Failed to load notes:', err);
     }
@@ -1169,6 +1170,9 @@ export default function HomePage(): JSX.Element {
       return <p className="text-gray-400 italic">No content</p>;
     }
 
+    console.log('[RENDER-PREVIEW] Rendering preview for body:', body.substring(0, 100));
+    console.log('[RENDER-PREVIEW] Available notes:', notes.map(n => ({ id: n.note_id, title: n.title })));
+
     // STEP 1: Extract wikilinks and replace with placeholders
     // Use {{}} to avoid markdown interpreting __ as bold/italic
     const WIKILINK_PATTERN = /\[\[([^\]]+)\]\]/g;
@@ -1177,8 +1181,10 @@ export default function HomePage(): JSX.Element {
 
     const bodyWithPlaceholders = body.replace(WIKILINK_PATTERN, (match, noteId) => {
       const targetNoteId = noteId.trim();
+      console.log('[RENDER-PREVIEW] Extracting wikilink:', targetNoteId);
       // Find note by exact ID match
       const targetNote = notes.find(n => n.note_id === targetNoteId);
+      console.log('[RENDER-PREVIEW] Found target note:', targetNote ? targetNote.title : 'NOT FOUND');
       const placeholder = `{{WIKILINK_${wikilinkIndex}}}`;
       wikilinks.push({ id: targetNoteId, note: targetNote || null });
       wikilinkIndex++;

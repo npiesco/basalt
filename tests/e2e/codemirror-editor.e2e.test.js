@@ -148,7 +148,7 @@ test.describe('CodeMirror 6 Editor', () => {
     await page.waitForSelector('[data-testid="note-item"]:has-text("Target Note")');
 
     // Wait for note to be fully created and persisted
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(2000);
 
     // Get the target note ID from the list - use first() to ensure single element
     const targetNoteItem = page.locator('[data-testid="note-item"]').filter({ hasText: 'Target Note' }).first();
@@ -159,42 +159,58 @@ test.describe('CodeMirror 6 Editor', () => {
       throw new Error(`Invalid target note ID: ${targetNoteId}`);
     }
 
+    console.log('[TEST] Target Note ID:', targetNoteId);
+
     // Create source note with wikilink
     await page.fill('[data-testid="note-title-input"]', 'Source Note');
     await page.click('[data-testid="new-note-button"]');
-    await page.waitForSelector('[data-testid="note-item"]', { timeout: 2000 });
+
+    // Wait for BOTH notes to be visible in the list
+    await page.waitForSelector('[data-testid="note-item"]:has-text("Target Note")');
+    await page.waitForSelector('[data-testid="note-item"]:has-text("Source Note")');
+    await page.waitForTimeout(1000);
+
+    // Verify we have 2 notes
+    const noteCount = await page.locator('[data-testid="note-item"]').count();
+    console.log('[TEST] Note count:', noteCount);
 
     // Click on source note to edit
-    const sourceNote = page.locator('[data-testid="note-item"]').filter({ hasText: 'Source Note' });
+    const sourceNote = page.locator('[data-testid="note-item"]').filter({ hasText: 'Source Note' }).first();
     await sourceNote.click();
 
-    // Type wikilink in CodeMirror
+    // Wait for editor to be ready
     await page.waitForSelector('.cm-content');
+    await page.waitForTimeout(500);
+
+    // Type wikilink in CodeMirror
     const cmContent = page.locator('.cm-content');
     await cmContent.click();
     await page.keyboard.type(`Link to [[${targetNoteId}]]`);
 
-    // Wait for autosave
-    await page.waitForTimeout(3500);
+    // Wait for autosave to complete
+    await page.waitForTimeout(4000);
+
+    // Wait for autosave indicator to show "Saved"
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
 
     // Wait extra time to ensure notes are reloaded after autosave
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
 
-    // Ensure we're still in the editor (note is selected)
-    await page.waitForSelector('[data-testid="edit-title-input"]', { state: 'visible' });
+    // Verify both notes still exist with correct titles
+    await expect(page.locator('[data-testid="note-item"]:has-text("Target Note")')).toBeVisible();
+    await expect(page.locator('[data-testid="note-item"]:has-text("Source Note")')).toBeVisible();
 
     // Switch to preview mode
     const viewModeButton = page.locator('[data-testid="toggle-preview-mode"]');
-    await page.waitForTimeout(500); // Small wait for UI to settle
     await viewModeButton.scrollIntoViewIfNeeded();
     await viewModeButton.click();
 
-    // Wait for preview to render with updated notes data
+    // Wait for preview to render
     await page.waitForSelector('[data-testid="note-preview"]');
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2000);
 
     // Wikilink should be rendered as clickable
-    const wikilink = page.locator('[data-testid="wikilink"]');
+    const wikilink = page.locator('[data-testid="wikilink"]').first();
     await expect(wikilink).toBeVisible({ timeout: 5000 });
     await expect(wikilink).toContainText('Target Note');
   });

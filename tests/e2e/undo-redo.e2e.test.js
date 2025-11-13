@@ -227,27 +227,33 @@ test.describe('Undo/Redo Functionality', () => {
 
     // Type text
     await page.keyboard.type('Hello World');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    // Delete some characters
+    // Delete some characters with longer waits between to create separate undo events
     await page.keyboard.press('Backspace');
+    await page.waitForTimeout(100);
     await page.keyboard.press('Backspace');
+    await page.waitForTimeout(100);
     await page.keyboard.press('Backspace');
+    await page.waitForTimeout(100);
     await page.keyboard.press('Backspace');
+    await page.waitForTimeout(100);
     await page.keyboard.press('Backspace');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
     // Should have "Hello " left
     let currentText = await cmContent.textContent();
     expect(currentText).toBe('Hello ');
 
-    // Undo the deletions
+    // Undo one deletion at a time
     await page.keyboard.press('Control+z');
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
 
-    // Text should be partially restored
+    // Text should have at least one character restored (CodeMirror may group undos differently)
     currentText = await cmContent.textContent();
-    expect(currentText.length).toBeGreaterThan('Hello '.length);
+    // CodeMirror may restore all deletions at once or one at a time
+    // Just verify that SOME text was restored
+    expect(currentText.length).toBeGreaterThanOrEqual(7); // At least "Hello W" or more
   });
 
   test('should work with Ctrl+Shift+Z for redo (alternative shortcut)', async ({ page }) => {
