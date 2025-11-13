@@ -24,18 +24,18 @@ test.describe('INTEGRATION: Clickable Wikilinks in Note Body', () => {
     }, targetTitle);
     console.log('[E2E] Target note ID:', targetId);
 
-    // Create source note with wikilink
+    // Create source note WITHOUT wikilink first
     const sourceTitle = `Source Note ${Date.now()}`;
-    const sourceBody = `This note references [[${targetId}]] and also mentions [[${targetId}]] again.\n\nMultiple references to the same note.`;
-
     await page.locator('[data-testid="note-title-input"]').fill(sourceTitle);
     await page.locator('[data-testid="new-note-button"]').click();
-    await page.waitForTimeout(500);
+    await page.waitForTimeout(1000);
 
+    // NOW go back and edit Source Note to add wikilinks
     await page.locator(`[data-testid="note-item"]:has-text("${sourceTitle}")`).click();
     await page.waitForTimeout(500);
 
-    // Use CodeMirror editor
+    // Type the wikilink content in CodeMirror
+    const sourceBody = `This note references [[${targetId}]] and also mentions [[${targetId}]] again.\n\nMultiple references to the same note.`;
     await page.waitForSelector('.cm-content');
     const cmContent = page.locator('.cm-content');
     await cmContent.click();

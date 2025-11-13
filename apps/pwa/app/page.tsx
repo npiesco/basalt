@@ -515,6 +515,10 @@ export default function HomePage(): JSX.Element {
         return note as Note;
       });
 
+      console.log('[LOAD-NOTES] Raw query result - columns:', result.columns);
+      console.log('[LOAD-NOTES] Raw query result - rows count:', result.rows.length);
+      console.log('[LOAD-NOTES] Parsed noteList:', noteList.map(n => ({ id: n.note_id, title: n.title, body_preview: n.body?.substring(0, 30) })));
+
       // Load tags for all notes
       const tagsResult = await executeQuery(
         database,
@@ -1165,13 +1169,13 @@ export default function HomePage(): JSX.Element {
     }
   }
 
-  function renderNotePreview(body: string) {
+  function renderNotePreview(body: string, notesArray: Note[]) {
     if (!body) {
       return <p className="text-gray-400 italic">No content</p>;
     }
 
     console.log('[RENDER-PREVIEW] Rendering preview for body:', body.substring(0, 100));
-    console.log('[RENDER-PREVIEW] Available notes:', notes.map(n => ({ id: n.note_id, title: n.title })));
+    console.log('[RENDER-PREVIEW] Available notes:', notesArray.map(n => ({ id: n.note_id, title: n.title })));
 
     // STEP 1: Extract wikilinks and replace with placeholders
     // Use {{}} to avoid markdown interpreting __ as bold/italic
@@ -1182,8 +1186,8 @@ export default function HomePage(): JSX.Element {
     const bodyWithPlaceholders = body.replace(WIKILINK_PATTERN, (match, noteId) => {
       const targetNoteId = noteId.trim();
       console.log('[RENDER-PREVIEW] Extracting wikilink:', targetNoteId);
-      // Find note by exact ID match
-      const targetNote = notes.find(n => n.note_id === targetNoteId);
+      // Find note by exact ID match - USE FRESH notesArray parameter
+      const targetNote = notesArray.find(n => n.note_id === targetNoteId);
       console.log('[RENDER-PREVIEW] Found target note:', targetNote ? targetNote.title : 'NOT FOUND');
       const placeholder = `{{WIKILINK_${wikilinkIndex}}}`;
       wikilinks.push({ id: targetNoteId, note: targetNote || null });
@@ -2808,10 +2812,11 @@ export default function HomePage(): JSX.Element {
                       </div>
                     ) : (
                       <div
+                        key={`preview-${notes.length}-${notes.map(n => n.note_id).join('-')}`}
                         data-testid="note-preview"
                         className="w-full min-h-[480px] px-4 py-2 border border-gray-300 rounded-lg bg-gray-50"
                       >
-                        {renderNotePreview(editBody)}
+                        {renderNotePreview(editBody, notes)}
                       </div>
                     )}
                   </div>
