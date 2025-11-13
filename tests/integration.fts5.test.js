@@ -33,7 +33,7 @@ test('INTEGRATION: FTS5 search finds notes by content', async () => {
   // Initialize WASM
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 
@@ -136,7 +136,7 @@ test('INTEGRATION: FTS5 triggers keep index in sync on UPDATE', async () => {
 
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 
@@ -214,7 +214,7 @@ test('INTEGRATION: FTS5 triggers keep index in sync on DELETE', async () => {
 
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 
@@ -284,7 +284,7 @@ test('INTEGRATION: FTS5 search with multiple terms and operators', async () => {
 
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
   await absurderSql.default(wasmBuffer);
 

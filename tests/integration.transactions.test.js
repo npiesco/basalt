@@ -48,7 +48,7 @@ describe('INTEGRATION: Database transactions with real absurder-sql', () => {
     console.log('[TEST] Starting transaction COMMIT test...');
 
     // Initialize WASM
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
     console.log('[TEST] ✓ WASM initialized');
@@ -115,7 +115,7 @@ describe('INTEGRATION: Database transactions with real absurder-sql', () => {
   test('Test ROLLBACK - transaction rollback on error', async () => {
     console.log('[TEST] Starting transaction ROLLBACK test...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -173,7 +173,7 @@ describe('INTEGRATION: Database transactions with real absurder-sql', () => {
   test('Test transaction atomicity - all or nothing', async () => {
     console.log('[TEST] Starting transaction atomicity test...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -262,7 +262,7 @@ describe('INTEGRATION: Database transactions with real absurder-sql', () => {
   test('Test transaction with UPDATEs and DELETEs', async () => {
     console.log('[TEST] Starting transaction with UPDATE/DELETE test...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 
@@ -357,7 +357,7 @@ describe('INTEGRATION: Database transactions with real absurder-sql', () => {
   test('Test transaction performance - bulk inserts', async () => {
     console.log('[TEST] Starting transaction performance test...');
 
-    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+    const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
     const wasmBuffer = await readFile(wasmPath);
     await absurderSql.default(wasmBuffer);
 

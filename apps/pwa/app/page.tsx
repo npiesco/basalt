@@ -107,6 +107,11 @@ export default function HomePage(): JSX.Element {
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const cyRef = useRef<any>(null); // Cytoscape instance
 
+  // Autosave state
+  const [autosaveStatus, setAutosaveStatus] = useState<'' | 'Saving...' | 'Saved' | 'No changes'>('');
+  const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
+
   // Initialize database on mount
   useEffect(() => {
     async function initializeDatabase() {
@@ -1087,12 +1092,30 @@ export default function HomePage(): JSX.Element {
     }
   }
 
-  function handleSelectNote(note: Note) {
+  async function handleSelectNote(note: Note) {
+    // Trigger immediate autosave of current note before switching
+    if (selectedNoteId && db) {
+      // Cancel any pending autosave timer
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      // Perform immediate autosave
+      await performAutosave();
+    }
+
     setSelectedNoteId(note.note_id);
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
     setViewMode('edit'); // Start in edit mode when selecting a note
+
+    // Set the last saved content to the note we just opened
+    // Use setTimeout to ensure state updates have completed
+    setTimeout(() => {
+      lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+      console.log('[AUTOSAVE] Set lastSavedContentRef for note:', note.note_id, lastSavedContentRef.current);
+    }, 100);
 
     // Load tags for this note
     if (db) {
@@ -1248,6 +1271,142 @@ export default function HomePage(): JSX.Element {
       </div>
     );
   }
+
+  // Autosave function - performs the actual save
+  async function performAutosave() {
+    console.log('[AUTOSAVE] performAutosave called', {
+      db: !!db,
+      selectedNoteId,
+      editTitle,
+      lastSaved: lastSavedContentRef.current
+    });
+
+    if (!db || !selectedNoteId || !editTitle.trim()) {
+      console.log('[AUTOSAVE] Skipping - missing db, noteId, or title');
+      return;
+    }
+
+    // Check if content has actually changed
+    if (editTitle === lastSavedContentRef.current.title &&
+        editBody === lastSavedContentRef.current.body) {
+      console.log('[AUTOSAVE] No changes detected');
+      setAutosaveStatus('No changes');
+      return;
+    }
+
+    console.log('[AUTOSAVE] Changes detected, saving...');
+
+    try {
+      setAutosaveStatus('Saving...');
+
+      await ensureWriteEnabled(db);
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+      const { extractWikiLinks } = await import('../../../packages/domain/src/markdown.js');
+      const now = new Date().toISOString();
+
+      // Update note
+      const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
+      const updateParams = [editTitle, editBody, now, selectedNoteId];
+      await executeQuery(db, updateSql, updateParams);
+
+      // Parse wikilinks from note body
+      const wikilinks = extractWikiLinks(editBody || '');
+
+      // Delete old backlinks for this note
+      await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+
+      // Insert new backlinks
+      for (const targetNoteId of wikilinks) {
+        try {
+          await executeQuery(
+            db,
+            'INSERT INTO backlinks (source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?)',
+            [selectedNoteId, targetNoteId, '', now]
+          );
+        } catch (err: any) {
+          // Ignore foreign key violations for non-existent target notes
+          if (!err.message?.includes('FOREIGN KEY constraint failed')) {
+            throw err;
+          }
+        }
+      }
+
+      // Handle tags
+      const tagsArray = editTags.split(',').map((t: string) => t.trim()).filter(Boolean);
+      await executeQuery(db, 'DELETE FROM note_tags WHERE note_id = ?', [selectedNoteId]);
+
+      for (const tagLabel of tagsArray) {
+        const tagLower = tagLabel.toLowerCase();
+        let tagId: string;
+
+        const existingTag = await executeQuery(db, 'SELECT tag_id FROM tags WHERE LOWER(label) = ?', [tagLower]);
+        if (existingTag.rows.length > 0) {
+          tagId = existingTag.rows[0].values[0].value as string;
+        } else {
+          tagId = `tag_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          await executeQuery(db, 'INSERT INTO tags (tag_id, label, created_at) VALUES (?, ?, ?)', [tagId, tagLabel, now]);
+        }
+
+        await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [selectedNoteId, tagId]);
+      }
+
+      // Sync if leader
+      await syncIfLeader(db);
+
+      // Update last saved content
+      lastSavedContentRef.current = { title: editTitle, body: editBody };
+
+      console.log('[AUTOSAVE] Save completed successfully');
+      setAutosaveStatus('Saved');
+
+      // Reload notes to reflect changes
+      await loadNotes();
+      await loadBacklinks();
+
+      // Clear "Saved" message after 2 seconds
+      setTimeout(() => {
+        setAutosaveStatus('');
+      }, 2000);
+
+    } catch (err: any) {
+      console.error('[PWA-AUTOSAVE] Autosave failed:', err);
+      setAutosaveStatus('');
+    }
+  }
+
+  // Debounced autosave trigger - cancels previous timer and starts new one
+  function triggerAutosave() {
+    // Clear any existing timer
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    // Show "Saving..." immediately to give user feedback
+    setAutosaveStatus('Saving...');
+
+    // Set new timer for 3 seconds
+    autosaveTimerRef.current = setTimeout(() => {
+      performAutosave();
+    }, 3000);
+  }
+
+  // Cleanup autosave timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Update last saved ref when a new note is selected (not when editing)
+  useEffect(() => {
+    if (selectedNoteId && editTitle && !autosaveTimerRef.current) {
+      // Only update if we just opened the note (no pending autosave)
+      lastSavedContentRef.current = { title: editTitle, body: editBody };
+      setAutosaveStatus('');
+    }
+  }, [selectedNoteId]);
 
   async function handleSaveEdit() {
     if (!db || !selectedNoteId || !editTitle.trim()) {
@@ -1523,11 +1682,28 @@ export default function HomePage(): JSX.Element {
     return () => clearTimeout(timer);
   }, [searchQuery, db]);
 
-  function handleSearchResultClick(note: Note) {
+  async function handleSearchResultClick(note: Note) {
+    // Trigger immediate autosave of current note before switching
+    if (selectedNoteId && db) {
+      // Cancel any pending autosave timer
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      // Perform immediate autosave
+      await performAutosave();
+    }
+
     setSelectedNoteId(note.note_id);
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
+
+    // Set the last saved content to the note we just opened
+    setTimeout(() => {
+      lastSavedContentRef.current = { title: note.title, body: note.body || '' };
+    }, 100);
+
     // Optionally clear search
     // setSearchQuery('');
   }
@@ -2540,9 +2716,12 @@ export default function HomePage(): JSX.Element {
                     <input
                       id="edit-title"
                       type="text"
-                      data-testid="editor-note-title"
+                      data-testid="edit-title-input"
                       value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
+                      onChange={(e) => {
+                        setEditTitle(e.target.value);
+                        triggerAutosave();
+                      }}
                       className="w-full px-4 py-2 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                       placeholder="Note title..."
                     />
@@ -2585,9 +2764,12 @@ export default function HomePage(): JSX.Element {
                     {viewMode === 'edit' ? (
                       <textarea
                         id="edit-body"
-                        data-testid="note-body-textarea"
+                        data-testid="edit-body-textarea"
                         value={editBody}
-                        onChange={(e) => setEditBody(e.target.value)}
+                        onChange={(e) => {
+                          setEditBody(e.target.value);
+                          triggerAutosave();
+                        }}
                         rows={20}
                         className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm"
                         placeholder="Write your note content here..."
@@ -2633,6 +2815,20 @@ export default function HomePage(): JSX.Element {
                     )}
                   </div>
 
+                  {/* Autosave Indicator */}
+                  {autosaveStatus && (
+                    <div
+                      data-testid="autosave-indicator"
+                      className={`text-sm font-medium px-3 py-1 rounded ${
+                        autosaveStatus === 'Saving...' ? 'text-blue-600 bg-blue-50' :
+                        autosaveStatus === 'Saved' ? 'text-green-600 bg-green-50' :
+                        'text-gray-600 bg-gray-50'
+                      }`}
+                    >
+                      {autosaveStatus}
+                    </div>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex gap-4">
                     <button
@@ -2643,14 +2839,26 @@ export default function HomePage(): JSX.Element {
                       Save Changes
                     </button>
                     <button
-                      data-testid="cancel-edit-button"
-                      onClick={() => {
+                      data-testid="close-note-btn"
+                      onClick={async () => {
+                        // Trigger immediate autosave before closing
+                        if (selectedNoteId && db) {
+                          // Cancel any pending autosave timer
+                          if (autosaveTimerRef.current) {
+                            clearTimeout(autosaveTimerRef.current);
+                            autosaveTimerRef.current = null;
+                          }
+                          // Perform immediate autosave
+                          await performAutosave();
+                        }
+
                         setSelectedNoteId(null);
                         setEditTitle('');
                         setEditBody('');
                         setEditTags('');
                         setNoteTags([]);
                         setViewMode('preview');
+                        setAutosaveStatus('');
                       }}
                       className="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400 font-medium"
                     >

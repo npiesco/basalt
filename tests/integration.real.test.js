@@ -19,7 +19,7 @@ test('INTEGRATION: Initialize absurder-sql, create database, run migrations, and
   // Step 1: Load WASM file for Node.js environment
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm');
+  const wasmPath = join(__dirname, '../node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm');
   const wasmBuffer = await readFile(wasmPath);
 
   // Initialize WASM with the buffer (Node.js doesn't support fetch)

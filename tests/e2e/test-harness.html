@@ -20,7 +20,7 @@
     console.log('[Harness] Starting initialization...');
 
     // Initialize WASM
-    const wasmUrl = '/node_modules/@npiesco/absurder-sql/pkg/absurder_sql_bg.wasm';
+    const wasmUrl = '/node_modules/@npiesco/absurder-sql/absurder_sql_bg.wasm';
     const response = await fetch(wasmUrl);
     const wasmBuffer = await response.arrayBuffer();
     await absurderSql.default(wasmBuffer);
