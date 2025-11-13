@@ -114,6 +114,7 @@ export default function HomePage(): JSX.Element {
   const autosaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastSavedContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
   const currentContentRef = useRef<{ title: string; body: string }>({ title: '', body: '' });
+  const selectedNoteIdRef = useRef<string | null>(null); // CRITICAL: Ref to prevent stale closure in autosave
 
   // Initialize database on mount
   useEffect(() => {
@@ -515,9 +516,13 @@ export default function HomePage(): JSX.Element {
         return note as Note;
       });
 
-      console.log('[LOAD-NOTES] Raw query result - columns:', result.columns);
-      console.log('[LOAD-NOTES] Raw query result - rows count:', result.rows.length);
-      console.log('[LOAD-NOTES] Parsed noteList:', noteList.map(n => ({ id: n.note_id, title: n.title, body_preview: n.body?.substring(0, 30) })));
+      console.log('[LOAD-NOTES] ========== LOADING NOTES ==========');
+      console.log('[LOAD-NOTES] Database:', database ? 'present' : 'NULL');
+      console.log('[LOAD-NOTES] Query returned columns:', result.columns);
+      console.log('[LOAD-NOTES] Query returned rows count:', result.rows.length);
+      console.log('[LOAD-NOTES] Raw rows:', JSON.stringify(result.rows.slice(0, 5)));
+      console.log('[LOAD-NOTES] Parsed noteList length:', noteList.length);
+      console.log('[LOAD-NOTES] Parsed noteList:', JSON.stringify(noteList.map(n => ({ id: n.note_id, title: n.title, updated: n.updated_at }))));
 
       // Load tags for all notes
       const tagsResult = await executeQuery(
@@ -549,9 +554,10 @@ export default function HomePage(): JSX.Element {
         note.tags = tagsByNoteId[note.note_id] || [];
       });
 
+      console.log('[LOAD-NOTES] About to call setNotes with', noteList.length, 'notes');
       setNotes(noteList);
-      console.log('[PWA] Loaded notes:', noteList.length);
-      console.log('[PWA] Note details:', noteList.map(n => ({ id: n.note_id, title: n.title, body: n.body?.substring(0, 50) })));
+      console.log('[LOAD-NOTES] setNotes called successfully');
+      console.log('[LOAD-NOTES] ========== DONE ==========');
     } catch (err) {
       console.error('[PWA] Failed to load notes:', err);
     }
@@ -1089,8 +1095,14 @@ export default function HomePage(): JSX.Element {
 
       // Auto-select the newly created note
       setSelectedNoteId(noteId);
+      selectedNoteIdRef.current = noteId; // SYNC REF!
       setEditTitle(newNoteTitle);
       setEditBody('');
+
+      // CRITICAL: Sync refs with the newly created note's data
+      currentContentRef.current = { title: newNoteTitle, body: '' };
+      lastSavedContentRef.current = { title: newNoteTitle, body: '' };
+      console.log('[CREATE-NOTE] Synced refs for new note:', noteId, 'selectedNoteIdRef:', selectedNoteIdRef.current);
 
       // Notify other tabs with the SQL to execute
       broadcastDataChange(insertSql, insertParams, 'create-note');
@@ -1101,8 +1113,14 @@ export default function HomePage(): JSX.Element {
   }
 
   async function handleSelectNote(note: Note) {
+    console.log('[SELECT-NOTE] ====================');
+    console.log('[SELECT-NOTE] Attempting to select note:', note.note_id, note.title);
+    console.log('[SELECT-NOTE] Current selectedNoteId:', selectedNoteId);
+    console.log('[SELECT-NOTE] Current currentContentRef:', currentContentRef.current);
+
     // Trigger immediate autosave of current note before switching
     if (selectedNoteId && db) {
+      console.log('[SELECT-NOTE] Triggering autosave for currently selected note:', selectedNoteId);
       // Cancel any pending autosave timer
       if (autosaveTimerRef.current) {
         clearTimeout(autosaveTimerRef.current);
@@ -1110,18 +1128,21 @@ export default function HomePage(): JSX.Element {
       }
       // Perform immediate autosave
       await performAutosave();
+      console.log('[SELECT-NOTE] Autosave complete');
     }
 
     // Set the last saved content IMMEDIATELY before changing state
     lastSavedContentRef.current = { title: note.title, body: note.body || '' };
     currentContentRef.current = { title: note.title, body: note.body || '' };
-    console.log('[AUTOSAVE] Set lastSavedContentRef for note:', note.note_id, lastSavedContentRef.current);
+    console.log('[SELECT-NOTE] Updated refs for note:', note.note_id);
 
     setSelectedNoteId(note.note_id);
+    selectedNoteIdRef.current = note.note_id; // SYNC REF!
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
     setViewMode('edit'); // Start in edit mode when selecting a note
+    console.log('[SELECT-NOTE] Selection complete, new selectedNoteId:', note.note_id, 'selectedNoteIdRef:', selectedNoteIdRef.current);
 
     // Load tags for this note
     if (db) {
@@ -1174,8 +1195,14 @@ export default function HomePage(): JSX.Element {
       return <p className="text-gray-400 italic">No content</p>;
     }
 
+    console.log('[RENDER-PREVIEW] ====================');
     console.log('[RENDER-PREVIEW] Rendering preview for body:', body.substring(0, 100));
-    console.log('[RENDER-PREVIEW] Available notes:', notesArray.map(n => ({ id: n.note_id, title: n.title })));
+    console.log('[RENDER-PREVIEW] notesArray length:', notesArray.length);
+    console.log('[RENDER-PREVIEW] notesArray:', JSON.stringify(notesArray.map(n => ({
+      id: n.note_id,
+      title: n.title,
+      updated_at: n.updated_at
+    }))));
 
     // STEP 1: Extract wikilinks and replace with placeholders
     // Use {{}} to avoid markdown interpreting __ as bold/italic
@@ -1185,10 +1212,14 @@ export default function HomePage(): JSX.Element {
 
     const bodyWithPlaceholders = body.replace(WIKILINK_PATTERN, (match, noteId) => {
       const targetNoteId = noteId.trim();
-      console.log('[RENDER-PREVIEW] Extracting wikilink:', targetNoteId);
+      console.log('[RENDER-PREVIEW] Extracting wikilink for ID:', targetNoteId);
       // Find note by exact ID match - USE FRESH notesArray parameter
       const targetNote = notesArray.find(n => n.note_id === targetNoteId);
-      console.log('[RENDER-PREVIEW] Found target note:', targetNote ? targetNote.title : 'NOT FOUND');
+      if (targetNote) {
+        console.log('[RENDER-PREVIEW] ✓ Found target note:', targetNote.note_id, '→', targetNote.title);
+      } else {
+        console.log('[RENDER-PREVIEW] ✗ Target note NOT FOUND');
+      }
       const placeholder = `{{WIKILINK_${wikilinkIndex}}}`;
       wikilinks.push({ id: targetNoteId, note: targetNote || null });
       wikilinkIndex++;
@@ -1279,8 +1310,15 @@ export default function HomePage(): JSX.Element {
   async function performAutosave() {
     const currentTitle = currentContentRef.current.title;
     const currentBody = currentContentRef.current.body;
+    const noteIdToSave = selectedNoteIdRef.current; // CRITICAL: Use ref to avoid stale closure
 
-    if (!db || !selectedNoteId || !currentTitle.trim()) {
+    console.log('[AUTOSAVE] ========== PERFORM AUTOSAVE ==========');
+    console.log('[AUTOSAVE] selectedNoteId (state):', selectedNoteId);
+    console.log('[AUTOSAVE] selectedNoteIdRef.current (ref):', noteIdToSave);
+    console.log('[AUTOSAVE] currentContentRef:', JSON.stringify(currentContentRef.current));
+
+    if (!db || !noteIdToSave || !currentTitle.trim()) {
+      console.log('[AUTOSAVE] Skipping autosave: db=', !!db, 'noteId=', noteIdToSave, 'title=', currentTitle);
       return;
     }
 
@@ -1288,6 +1326,7 @@ export default function HomePage(): JSX.Element {
     if (currentTitle === lastSavedContentRef.current.title &&
         currentBody === lastSavedContentRef.current.body) {
       setAutosaveStatus('No changes');
+      console.log('[AUTOSAVE] No changes detected, skipping');
       return;
     }
 
@@ -1299,16 +1338,22 @@ export default function HomePage(): JSX.Element {
       const { extractWikiLinks } = await import('../../../packages/domain/src/markdown.js');
       const now = new Date().toISOString();
 
-      // Update note
+      // Update note - USE REF VALUE, NOT STATE!
       const updateSql = 'UPDATE notes SET title = ?, body = ?, updated_at = ? WHERE note_id = ?';
-      const updateParams = [currentTitle, currentBody, now, selectedNoteId];
+      const updateParams = [currentTitle, currentBody, now, noteIdToSave];
+      console.log('[AUTOSAVE] Executing UPDATE with params:', {
+        title: currentTitle,
+        bodyLength: currentBody.length,
+        note_id: noteIdToSave
+      });
       await executeQuery(db, updateSql, updateParams);
+      console.log('[AUTOSAVE] UPDATE complete');
 
       // Parse wikilinks from note body
       const wikilinks = extractWikiLinks(currentBody || '');
 
-      // Delete old backlinks for this note
-      await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [selectedNoteId]);
+      // Delete old backlinks for this note - USE REF VALUE!
+      await executeQuery(db, 'DELETE FROM backlinks WHERE source_note_id = ?', [noteIdToSave]);
 
       // Insert new backlinks
       for (const targetNoteId of wikilinks) {
@@ -1316,7 +1361,7 @@ export default function HomePage(): JSX.Element {
           await executeQuery(
             db,
             'INSERT INTO backlinks (source_note_id, target_note_id, context_snippet, created_at) VALUES (?, ?, ?, ?)',
-            [selectedNoteId, targetNoteId, '', now]
+            [noteIdToSave, targetNoteId, '', now]
           );
         } catch (err: any) {
           // Ignore foreign key violations for non-existent target notes
@@ -1326,9 +1371,9 @@ export default function HomePage(): JSX.Element {
         }
       }
 
-      // Handle tags
+      // Handle tags - USE REF VALUE!
       const tagsArray = editTags.split(',').map((t: string) => t.trim()).filter(Boolean);
-      await executeQuery(db, 'DELETE FROM note_tags WHERE note_id = ?', [selectedNoteId]);
+      await executeQuery(db, 'DELETE FROM note_tags WHERE note_id = ?', [noteIdToSave]);
 
       for (const tagLabel of tagsArray) {
         const tagLower = tagLabel.toLowerCase();
@@ -1342,7 +1387,7 @@ export default function HomePage(): JSX.Element {
           await executeQuery(db, 'INSERT INTO tags (tag_id, label, created_at) VALUES (?, ?, ?)', [tagId, tagLabel, now]);
         }
 
-        await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [selectedNoteId, tagId]);
+        await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [noteIdToSave, tagId]);
       }
 
       // PROPER ABSURDER-SQL SAVE PATTERN: sync → close → reopen
@@ -1380,6 +1425,11 @@ export default function HomePage(): JSX.Element {
           (window as any).basaltDb = newDb;
         }
 
+        // DEBUG: Expose notes state for testing
+        if (typeof window !== 'undefined') {
+          (window as any).getNotesState = () => notes;
+        }
+
         console.log('[AUTOSAVE] ✓ All database references updated');
       } catch (reopenErr: any) {
         console.error('[AUTOSAVE] ERROR in Step 3 (reopen):', reopenErr);
@@ -1409,6 +1459,10 @@ export default function HomePage(): JSX.Element {
 
   // Debounced autosave trigger - cancels previous timer and starts new one
   function triggerAutosave() {
+    console.log('[TRIGGER-AUTOSAVE] ========== TRIGGER AUTOSAVE ==========');
+    console.log('[TRIGGER-AUTOSAVE] selectedNoteId at trigger time:', selectedNoteId);
+    console.log('[TRIGGER-AUTOSAVE] currentContentRef at trigger time:', JSON.stringify(currentContentRef.current));
+
     // Clear any existing timer
     if (autosaveTimerRef.current) {
       clearTimeout(autosaveTimerRef.current);
@@ -1417,8 +1471,15 @@ export default function HomePage(): JSX.Element {
     // Show "Saving..." immediately to give user feedback
     setAutosaveStatus('Saving...');
 
+    // CAPTURE selectedNoteId in closure to avoid stale state
+    const noteIdToSave = selectedNoteId;
+    console.log('[TRIGGER-AUTOSAVE] Captured noteIdToSave for timer:', noteIdToSave);
+
     // Set new timer for 3 seconds
     autosaveTimerRef.current = setTimeout(() => {
+      console.log('[AUTOSAVE-TIMER-FIRED] Timer fired, calling performAutosave');
+      console.log('[AUTOSAVE-TIMER-FIRED] selectedNoteId when timer fires:', selectedNoteId);
+      console.log('[AUTOSAVE-TIMER-FIRED] noteIdToSave from closure:', noteIdToSave);
       performAutosave();
     }, 3000);
   }
@@ -1631,6 +1692,7 @@ export default function HomePage(): JSX.Element {
 
       if (selectedNoteId === deleteConfirmNoteId) {
         setSelectedNoteId(null);
+        selectedNoteIdRef.current = null; // SYNC REF!
         setEditTitle('');
         setEditBody('');
       }
@@ -1731,6 +1793,7 @@ export default function HomePage(): JSX.Element {
     lastSavedContentRef.current = { title: note.title, body: note.body || '' };
 
     setSelectedNoteId(note.note_id);
+    selectedNoteIdRef.current = note.note_id; // SYNC REF!
     setEditTitle(note.title);
     setEditBody(note.body || '');
     setError(null);
@@ -1886,6 +1949,7 @@ export default function HomePage(): JSX.Element {
 
       // Clear UI state
       setSelectedNoteId(null);
+      selectedNoteIdRef.current = null; // SYNC REF!
       setEditTitle('');
       setEditBody('');
       setSearchQuery('');
@@ -2053,6 +2117,7 @@ export default function HomePage(): JSX.Element {
 
     // Open edit mode for the note
     setSelectedNoteId(contextMenuNote.note_id);
+    selectedNoteIdRef.current = contextMenuNote.note_id; // SYNC REF!
     setEditTitle(contextMenuNote.title);
     setEditBody(contextMenuNote.body || '');
 
@@ -2890,6 +2955,7 @@ export default function HomePage(): JSX.Element {
                         }
 
                         setSelectedNoteId(null);
+                        selectedNoteIdRef.current = null; // SYNC REF!
                         setEditTitle('');
                         setEditBody('');
                         setEditTags('');
