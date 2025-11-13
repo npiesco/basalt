@@ -1372,14 +1372,21 @@ export default function HomePage(): JSX.Element {
       await ensureWriteEnabled(db);
       const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
 
-      // Manually delete backlinks first (CASCADE DELETE workaround)
-      // Delete backlinks where this note is the source
+      // Manually delete related data first (CASCADE DELETE workaround for absurder-sql)
+
+      // 1. Delete backlinks where this note is the source
       const deleteBacklinksSql = 'DELETE FROM backlinks WHERE source_note_id = ?';
       const deleteBacklinksParams = [deleteConfirmNoteId];
       await executeQuery(db, deleteBacklinksSql, deleteBacklinksParams);
       console.log('[PWA] Deleted backlinks for note:', deleteConfirmNoteId);
 
-      // Delete the note itself
+      // 2. Delete note_tags entries (tag assignments)
+      const deleteNoteTagsSql = 'DELETE FROM note_tags WHERE note_id = ?';
+      const deleteNoteTagsParams = [deleteConfirmNoteId];
+      await executeQuery(db, deleteNoteTagsSql, deleteNoteTagsParams);
+      console.log('[PWA] Deleted tag assignments for note:', deleteConfirmNoteId);
+
+      // 3. Delete the note itself
       const deleteSql = 'DELETE FROM notes WHERE note_id = ?';
       const deleteParams = [deleteConfirmNoteId];
       await executeQuery(db, deleteSql, deleteParams);
@@ -1398,8 +1405,9 @@ export default function HomePage(): JSX.Element {
       setError(null);
       await loadNotes(db);
 
-      // Notify other tabs with BOTH SQL commands to execute
+      // Notify other tabs with ALL SQL commands to execute
       broadcastDataChange(deleteBacklinksSql, deleteBacklinksParams, 'delete-backlinks');
+      broadcastDataChange(deleteNoteTagsSql, deleteNoteTagsParams, 'delete-note-tags');
       broadcastDataChange(deleteSql, deleteParams, 'delete-note');
     } catch (err) {
       console.error('[PWA] Failed to delete note:', err);
