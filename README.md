@@ -27,6 +27,9 @@ Basalt is a **next-generation knowledge base** that improves upon Obsidian's vis
 - **[?] Full-Text Search**: FTS5-powered search across all note content
 - **[~] Multi-Tab Sync**: Real-time synchronization with leader election
 - **[#] Three-Pane Layout**: Familiar Obsidian-inspired interface
+- **[[]] Wikilinks**: Clickable `[[note_id]]` links with navigation
+- **[<-] Backlinks Panel**: See all notes that reference current note
+- **[*] Graph View**: Visualize note connections with Cytoscape.js
 
 ## Quick Start
 
@@ -222,6 +225,61 @@ importButton.click();  // Select .db file to restore
 | Delete Folder | Folder + notes (CASCADE) | [x] Dialog | `DELETE FROM folders WHERE folder_id = ?` |
 | Clear Database | All data (keeps root) | [!] Warning | `window.basaltDb.clearDatabase()` |
 
+### [[]] Wikilinks & Backlinks
+
+**Obsidian-style bidirectional linking:**
+
+```markdown
+# Note A
+This references [[note_xyz_123]] in the content.
+```
+
+**Features:**
+- **Clickable Wikilinks**: `[[note_id]]` syntax renders as clickable links showing target note titles
+- **Edit/Preview Mode**: Toggle between editing raw text and viewing rendered wikilinks
+- **Broken Link Detection**: Non-existent notes styled with red text
+- **Backlinks Panel**: Right sidebar shows all notes referencing current note
+- **Auto-parsing**: Wikilinks extracted and stored in `backlinks` table on save
+- **Navigation**: Click wikilinks or backlinks to instantly jump to target notes
+
+**Database Schema:**
+```sql
+CREATE TABLE backlinks (
+  source_note_id TEXT NOT NULL,
+  target_note_id TEXT NOT NULL,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (source_note_id) REFERENCES notes(note_id) ON DELETE CASCADE,
+  FOREIGN KEY (target_note_id) REFERENCES notes(note_id) ON DELETE CASCADE,
+  PRIMARY KEY (source_note_id, target_note_id)
+);
+```
+
+### [*] Graph View
+
+**Interactive graph visualization powered by Cytoscape.js:**
+
+```javascript
+// Open graph view
+document.querySelector('[data-testid="graph-view-button"]').click();
+
+// Graph shows:
+// - All notes as nodes (labeled with titles)
+// - Backlinks as directed edges (arrows)
+// - Force-directed layout (cose algorithm)
+```
+
+**Features:**
+- **Force-Directed Layout**: Notes automatically positioned to minimize edge crossing
+- **Node Click Navigation**: Click any node to navigate to that note
+- **Dynamic Updates**: Graph refreshes when backlinks change
+- **Visual Styling**: Selected nodes highlighted, edges show directionality
+- **Performance**: Handles large vaults efficiently (tested with 100+ notes)
+
+**Implementation:**
+- Cytoscape.js for graph rendering
+- Real-time backlinks query on graph open
+- Modal overlay with pan/zoom controls
+
 ## Development
 
 ### Project Structure
@@ -241,14 +299,17 @@ basalt/
 │   │       └── migrations/        # SQL schema definitions
 │   └── shared-ui/        # Shared React components (future)
 ├── tests/
-│   └── e2e/              # Playwright E2E tests (78+ tests)
+│   └── e2e/              # Playwright E2E tests (90+ tests)
 │       ├── create-note.e2e.test.js
 │       ├── edit-note.e2e.test.js
 │       ├── delete-note.e2e.test.js
 │       ├── folder-management.e2e.test.js
 │       ├── drag-drop-folders.e2e.test.js
 │       ├── multi-tab-sync.e2e.test.js
-│       ├── search.e2e.test.js
+│       ├── fts-search-ui.e2e.test.js
+│       ├── clickable-wikilinks.e2e.test.js     # NEW
+│       ├── wikilinks-backlinks.e2e.test.js     # NEW
+│       ├── graph-view.e2e.test.js              # NEW
 │       └── database-clear-export-import.e2e.test.js
 └── docs/
     └── UNIFIED_OBSIDIAN_REBUILD_PLAN.md  # Product roadmap
@@ -311,6 +372,9 @@ See [commit history](https://github.com/npiesco/basalt/commits/main) for detaile
 | **Export** | Markdown files | SQLite .db files |
 | **Platform** | Desktop + Mobile | PWA (Web) |
 | **License** | Proprietary | AGPL-3.0 (Open Source) |
+| **Wikilinks** | [x] Markdown syntax | [x] SQL-backed |
+| **Backlinks** | [x] Panel view | [x] Panel view |
+| **Graph View** | [x] Native | [x] Cytoscape.js |
 | **Extensibility** | Plugins (JS) | SQL + React components |
 
 **When to choose Basalt:**
@@ -319,12 +383,14 @@ See [commit history](https://github.com/npiesco/basalt/commits/main) for detaile
 - Prefer open-source (AGPL-3.0)
 - Need multi-tab coordination out-of-the-box
 - Want database export/import portability
+- Need wikilinks and graph view with SQL backing
 
 **When to choose Obsidian:**
 - Need markdown file compatibility
 - Want mobile apps (iOS, Android)
 - Prefer rich plugin ecosystem
-- Need graph view, canvas, etc.
+- Need canvas, daily notes, templates
+- Want mature plugin marketplace
 
 ## Roadmap
 
@@ -334,21 +400,33 @@ See [`docs/UNIFIED_OBSIDIAN_REBUILD_PLAN.md`](./docs/UNIFIED_OBSIDIAN_REBUILD_PL
 - [x] Core CRUD operations (notes, folders)
 - [x] Multi-tab sync with leader election
 - [x] Drag-and-drop organization
-- [x] Full-text search (FTS5)
-- [x] Export/Import functionality
+- [x] Three-pane Obsidian-style layout
 - [x] Database clearing
 
-**Phase 2 (In Progress):**
-- [~] Tauri desktop app
-- [~] Wiki-style links `[[note]]`
-- [~] Backlinks panel
-- [~] Tags and metadata
+**Phase 2 (Completed):**
+- [x] Export/Import functionality
+- [x] PWA configuration with offline support
+- [x] Mobile responsive design
+- [x] Service worker caching
 
-**Phase 3 (Planned):**
-- [ ] Graph view
-- [ ] Markdown rendering
+**Phase 3 (Completed):**
+- [x] Full-text search (FTS5) with UI
+- [x] Wiki-style links `[[note_id]]`
+- [x] Backlinks panel
+- [x] Graph view (Cytoscape.js)
+- [x] Tags and metadata
+
+**Phase 4 (In Progress):**
+- [ ] Tauri desktop app
+- [ ] Native file system access
+- [ ] Markdown rendering enhancements
 - [ ] Attachment support
+
+**Phase 5 (Planned):**
 - [ ] Cloud sync (optional)
+- [ ] Plugin system
+- [ ] Theming support
+- [ ] Performance optimizations
 
 ## Known Issues
 
@@ -388,6 +466,7 @@ export default {
 - `next` ^16.0.1 (React framework)
 - `react` ^19.0.0 (UI library)
 - `react-dom` ^19.0.0 (DOM bindings)
+- `cytoscape` ^3.30.4 (Graph visualization)
 
 **Development:**
 - `@playwright/test` ^1.49.1 (E2E testing)
