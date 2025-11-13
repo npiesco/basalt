@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { initBasaltDb } from '../lib/db/client';
+import cytoscape from 'cytoscape';
 
 interface Note {
   note_id: string;
@@ -99,6 +100,11 @@ export default function HomePage(): JSX.Element {
   const [editTags, setEditTags] = useState<string>('');
   const [noteTags, setNoteTags] = useState<Tag[]>([]);
   const [filterTagLabel, setFilterTagLabel] = useState<string | null>(null);
+
+  // Graph view state
+  const [isGraphViewOpen, setIsGraphViewOpen] = useState(false);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const cyRef = useRef<any>(null); // Cytoscape instance
 
   // Initialize database on mount
   useEffect(() => {
@@ -1842,6 +1848,155 @@ export default function HomePage(): JSX.Element {
     setSelectedNoteIds(new Set());
   }
 
+  // Graph View: Initialize Cytoscape when graph opens
+  useEffect(() => {
+    if (!isGraphViewOpen || !graphContainerRef.current) return;
+
+    console.log('[PWA-GRAPH] Initializing Cytoscape graph view');
+
+    // Build nodes and edges from notes and backlinks
+    const nodes = notes.map(note => ({
+      data: {
+        id: note.note_id,
+        label: note.title,
+        type: 'note'
+      }
+    }));
+
+    // Get all backlinks from database
+    const edges = backlinks.map((link, index) => ({
+      data: {
+        id: `edge-${index}`,
+        source: link.source_note_id,
+        target: link.target_note_id
+      }
+    }));
+
+    console.log(`[PWA-GRAPH] Rendering ${nodes.length} nodes and ${edges.length} edges`);
+
+    // Initialize Cytoscape
+    const cy = cytoscape({
+      container: graphContainerRef.current,
+      elements: [...nodes, ...edges],
+      style: [
+        {
+          selector: 'node',
+          style: {
+            'background-color': '#3b82f6',
+            'label': 'data(label)',
+            'color': '#1f2937',
+            'text-valign': 'center',
+            'text-halign': 'center',
+            'font-size': '12px',
+            'width': '60px',
+            'height': '60px',
+            'text-wrap': 'wrap',
+            'text-max-width': '80px'
+          }
+        },
+        {
+          selector: 'edge',
+          style: {
+            'width': 2,
+            'line-color': '#9ca3af',
+            'target-arrow-color': '#9ca3af',
+            'target-arrow-shape': 'triangle',
+            'curve-style': 'bezier'
+          }
+        },
+        {
+          selector: 'node:selected',
+          style: {
+            'background-color': '#ef4444',
+            'border-width': 3,
+            'border-color': '#dc2626'
+          }
+        }
+      ],
+      layout: {
+        name: 'cose', // Force-directed layout
+        animate: true,
+        animationDuration: 500,
+        padding: 30
+      }
+    });
+
+    // Handle node click to navigate
+    cy.on('tap', 'node', (evt) => {
+      const nodeId = evt.target.id();
+      console.log('[PWA-GRAPH] Node clicked:', nodeId);
+
+      // Navigate to the clicked note
+      handleSelectNote(nodeId);
+
+      // Optionally close graph view after navigation
+      setIsGraphViewOpen(false);
+    });
+
+    // Store cy instance for access from tests
+    cyRef.current = cy;
+    if (typeof window !== 'undefined') {
+      (window as any).cy = cy;
+    }
+
+    console.log('[PWA-GRAPH] ✓ Cytoscape initialized successfully');
+
+    // Cleanup on unmount or when graph closes
+    return () => {
+      if (cyRef.current) {
+        cyRef.current.destroy();
+        cyRef.current = null;
+        if (typeof window !== 'undefined') {
+          delete (window as any).cy;
+        }
+        console.log('[PWA-GRAPH] Cytoscape instance destroyed');
+      }
+    };
+  }, [isGraphViewOpen, notes, backlinks]);
+
+  // Graph View: Load all backlinks when opening graph
+  async function loadAllBacklinks() {
+    if (!db) return;
+
+    try {
+      const { executeQuery } = await import('../../../packages/domain/src/dbClient.js');
+
+      console.log('[PWA-GRAPH] Loading all backlinks for graph...');
+
+      const result = await executeQuery(
+        db,
+        'SELECT source_note_id, target_note_id FROM backlinks',
+        []
+      );
+
+      const allBacklinks: Backlink[] = result.rows.map((row: any) => ({
+        source_note_id: row.values[0].value,
+        target_note_id: row.values[1].value,
+        source_note_title: '',
+        context_snippet: '',
+        created_at: ''
+      }));
+
+      setBacklinks(allBacklinks);
+      console.log(`[PWA-GRAPH] ✓ Loaded ${allBacklinks.length} backlinks`);
+    } catch (err) {
+      console.error('[PWA-GRAPH] Failed to load backlinks:', err);
+    }
+  }
+
+  // Graph View: Open graph
+  async function handleOpenGraph() {
+    console.log('[PWA-GRAPH] Opening graph view...');
+    await loadAllBacklinks(); // Load all backlinks first
+    setIsGraphViewOpen(true);
+  }
+
+  // Graph View: Close graph
+  function handleCloseGraph() {
+    console.log('[PWA-GRAPH] Closing graph view');
+    setIsGraphViewOpen(false);
+  }
+
   if (error && !isReady) {
     return (
       <div className="min-h-screen bg-red-50 p-8">
@@ -2028,6 +2183,17 @@ export default function HomePage(): JSX.Element {
             title="Clear all data from database"
           >
             🗑️ Clear
+          </button>
+
+          {/* Graph View Button */}
+          <button
+            data-testid="graph-view-button"
+            onClick={handleOpenGraph}
+            disabled={!db}
+            className="px-4 py-2 bg-purple-600 text-white text-sm rounded-lg hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-purple-500 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            title="Open graph view of note connections"
+          >
+            🕸️ Graph
           </button>
 
           {/* Hidden File Input */}
@@ -2836,6 +3002,51 @@ export default function HomePage(): JSX.Element {
           className="md:hidden fixed inset-0 bg-black bg-opacity-50 z-20"
           onClick={() => setIsLeftSidebarOpen(false)}
         />
+      )}
+
+      {/* Graph View Panel */}
+      {isGraphViewOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4"
+          onClick={handleCloseGraph}
+        >
+          <div
+            data-testid="graph-view-panel"
+            className="bg-white rounded-lg shadow-2xl w-full max-w-6xl h-[80vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Graph Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200">
+              <h2 className="text-xl font-bold text-gray-900">Graph View</h2>
+              <button
+                data-testid="close-graph-view"
+                onClick={handleCloseGraph}
+                className="text-gray-500 hover:text-gray-700 text-2xl font-bold"
+                aria-label="Close graph view"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Graph Container */}
+            <div
+              data-testid="graph-container"
+              ref={graphContainerRef}
+              className="flex-1 bg-gray-50"
+              style={{ width: '100%', height: '100%', minHeight: '400px', display: 'block', visibility: 'visible' }}
+            />
+
+            {/* Graph Info Footer */}
+            <div className="p-4 border-t border-gray-200 bg-gray-100 text-sm text-gray-600">
+              <p>
+                <strong>{notes.length}</strong> notes · <strong>{backlinks.length}</strong> connections
+              </p>
+              <p className="mt-1 text-xs">
+                Click nodes to navigate • Drag to pan • Scroll to zoom
+              </p>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
