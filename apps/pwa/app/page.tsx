@@ -1390,68 +1390,15 @@ export default function HomePage(): JSX.Element {
         await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [noteIdToSave, tagId]);
       }
 
-      // PROPER ABSURDER-SQL SAVE PATTERN: sync → close → reopen
+      // ✅ CORRECT PATTERN: Just sync, keep database open
+      // DON'T close/reopen - causes IndexedDB corruption race condition
       try {
-        console.log('[AUTOSAVE] Step 1: Syncing to IndexedDB...');
+        console.log('[AUTOSAVE] Syncing to IndexedDB...');
         await db.sync();
-        console.log('[AUTOSAVE] ✓ Step 1 complete');
+        console.log('[AUTOSAVE] ✓ Sync complete - database stays open');
       } catch (syncErr: any) {
-        console.error('[AUTOSAVE] ERROR in Step 1 (sync):', syncErr);
+        console.error('[AUTOSAVE] ERROR syncing to IndexedDB:', syncErr);
         throw syncErr;
-      }
-
-      try {
-        console.log('[AUTOSAVE] Step 2: Closing database...');
-        await db.close();
-        console.log('[AUTOSAVE] ✓ Step 2 complete');
-      } catch (closeErr: any) {
-        console.error('[AUTOSAVE] ERROR in Step 2 (close):', closeErr);
-        throw closeErr;
-      }
-
-      // CRITICAL: Wait for IndexedDB to fully flush before reopening
-      console.log('[AUTOSAVE] Waiting for IndexedDB flush...');
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      let newDb;
-      try {
-        console.log('[AUTOSAVE] Step 3: Reopening database with name:', dbNameRef.current);
-        const { Database } = await import('@npiesco/absurder-sql');
-        newDb = await Database.newDatabase(dbNameRef.current);
-        console.log('[AUTOSAVE] ✓ Step 3 complete - database reopened');
-
-        // Update db reference
-        setDb(newDb);
-        dbRef.current = newDb;
-
-        // Expose on window for E2E tests - MUST WRAP WITH executeQuery HELPER!
-        if (typeof window !== 'undefined') {
-          const { executeQuery: execQuery } = await import('../../../packages/domain/src/dbClient.js');
-
-          (window as any).basaltDb = {
-            executeQuery: async (sql: string, params: any[]) => {
-              return execQuery(newDb, sql, params);
-            },
-            clearDatabase: async () => {
-              await execQuery(newDb, 'DELETE FROM note_tags', []);
-              await execQuery(newDb, 'DELETE FROM backlinks', []);
-              await execQuery(newDb, 'DELETE FROM notes', []);
-              await execQuery(newDb, 'DELETE FROM folders WHERE folder_id != ?', ['root']);
-              await execQuery(newDb, 'DELETE FROM tags', []);
-            },
-            __db__: newDb
-          };
-        }
-
-        // DEBUG: Expose notes state for testing
-        if (typeof window !== 'undefined') {
-          (window as any).getNotesState = () => notes;
-        }
-
-        console.log('[AUTOSAVE] ✓ All database references updated');
-      } catch (reopenErr: any) {
-        console.error('[AUTOSAVE] ERROR in Step 3 (reopen):', reopenErr);
-        throw reopenErr;
       }
 
       // Update last saved content
@@ -1460,8 +1407,8 @@ export default function HomePage(): JSX.Element {
       console.log('[AUTOSAVE] Save completed successfully');
       setAutosaveStatus('Saved');
 
-      // Reload notes to reflect changes - use newDb directly instead of state
-      await loadNotes(newDb);
+      // Reload notes to reflect changes - use existing db
+      await loadNotes(db);
       await loadBacklinks();
 
       // Clear "Saved" message after 2 seconds
