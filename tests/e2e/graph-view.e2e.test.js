@@ -96,9 +96,17 @@ test.describe('INTEGRATION: Graph View', () => {
 
     await page.locator(`[data-testid="note-item"]:has-text("${note2Title}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(`See [[${note1Id}]] for details.`);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    let cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(`See [[${note1Id}]] for details.`);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(1000);
 
     // Create note 3 that also links to note 1
     const note3Title = `Testing ${Date.now()}`;
@@ -108,9 +116,17 @@ test.describe('INTEGRATION: Graph View', () => {
 
     await page.locator(`[data-testid="note-item"]:has-text("${note3Title}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(`Based on [[${note1Id}]].`);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(`Based on [[${note1Id}]].`);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(1000);
 
     // Open graph view
     await page.locator('[data-testid="graph-view-button"]').click();
@@ -165,8 +181,8 @@ test.describe('INTEGRATION: Graph View', () => {
     await page.waitForTimeout(300);
 
     // Verify note 1 is now selected in editor (check the visible input value)
-    await expect(page.locator('[data-testid="editor-note-title"]')).toBeVisible();
-    const selectedTitle = await page.locator('[data-testid="editor-note-title"]').inputValue();
+    await expect(page.locator('[data-testid="edit-title-input"]')).toBeVisible();
+    const selectedTitle = await page.locator('[data-testid="edit-title-input"]').inputValue();
     expect(selectedTitle).toContain(note1Title);
 
     console.log('[E2E] ✓✓✓ GRAPH NODE NAVIGATION WORKS!');
@@ -212,9 +228,17 @@ test.describe('INTEGRATION: Graph View', () => {
     // Add backlink from note2 to note1
     await page.locator(`[data-testid="note-item"]:has-text("${note2Title}")`).click();
     await page.waitForTimeout(300);
-    await page.locator('[data-testid="note-body-textarea"]').fill(`Connects to [[${note1Id}]].`);
-    await page.locator('[data-testid="save-note-button"]').click();
-    await page.waitForTimeout(500);
+
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(`Connects to [[${note1Id}]].`);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(1000);
 
     // Reopen graph view
     await page.locator('[data-testid="graph-view-button"]').click();
