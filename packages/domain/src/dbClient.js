@@ -34,12 +34,125 @@ export async function initDb({ absurderSql, storageKey, migrations = [] }) {
     await initWasm();
   }
 
+  // Multi-tab coordination: Use BroadcastChannel to coordinate database creation
+  // Only one tab should call newDatabase() at a time to prevent IndexedDB corruption
+  const initChannel = new BroadcastChannel(`${storageKey}-init`);
+  const myTabId = `${Date.now()}-${Math.random()}`;
+
+  // Check if another tab is currently initializing
+  let canProceed = false;
+  const initRequest = new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      // No response after 1s, we can proceed
+      canProceed = true;
+      resolve();
+    }, 1000);
+
+    initChannel.onmessage = (event) => {
+      if (event.data.type === 'INIT_IN_PROGRESS' && event.data.tabId !== myTabId) {
+        // Another tab is initializing, wait for it to finish
+        clearTimeout(timeout);
+      } else if (event.data.type === 'INIT_COMPLETE') {
+        // Another tab finished initializing
+        clearTimeout(timeout);
+        resolve();
+      }
+    };
+
+    // Broadcast that we want to initialize
+    initChannel.postMessage({ type: 'INIT_REQUEST', tabId: myTabId });
+  });
+
+  await initRequest;
+
+  // Broadcast that we're initializing
+  initChannel.postMessage({ type: 'INIT_IN_PROGRESS', tabId: myTabId });
+
   // Create database - newDatabase takes a string name, not an object
   const db = await Database.newDatabase(storageKey);
 
   if (!db || typeof db.execute !== 'function') {
     throw new Error('absurder-sql database handle must expose execute method');
   }
+
+  // Notify other tabs that initialization is complete
+  initChannel.postMessage({ type: 'INIT_COMPLETE', tabId: myTabId });
+  initChannel.close();
+
+  // Check if database is already initialized (tables exist)
+  // This prevents race conditions when multiple tabs open simultaneously
+  let tablesExist = false;
+  try {
+    const result = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='notes'");
+    tablesExist = result && result.rows && result.rows.length > 0;
+  } catch (error) {
+    // Table check failed, database might be corrupted or not initialized
+    console.log('[DEBUG] Table check failed, will attempt initialization');
+  }
+
+  if (tablesExist) {
+    // Database already initialized by another tab or previous session
+    console.log('[DEBUG] Database already initialized, skipping migrations');
+
+    // Just enable foreign keys and return
+    try {
+      await db.execute('PRAGMA foreign_keys = ON');
+      console.log('[DEBUG] Foreign keys enabled successfully');
+    } catch (error) {
+      console.error('[ERROR] Failed to enable foreign keys:', error);
+      throw error;
+    }
+
+    console.log('[DEBUG] Non-leader writes remain enabled for BroadcastChannel sync');
+    return db;
+  }
+
+  // Database not initialized - check if we're the leader
+  const isLeader = await db.isLeader();
+  console.log(`[DEBUG] Database needs initialization. Tab is ${isLeader ? 'LEADER' : 'FOLLOWER'}`);
+
+  if (!isLeader) {
+    // Non-leader tab: wait for leader to complete initialization via event-based sync
+    console.log('[DEBUG] Follower waiting for leader to complete initialization (event-based)...');
+
+    // Use onDataChange callback to detect when leader syncs the initialized database
+    const initComplete = new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Timeout waiting for leader to initialize database'));
+      }, 30000); // 30 second timeout
+
+      db.onDataChange(async () => {
+        try {
+          // Check if notes table now exists
+          const result = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='notes'");
+          if (result && result.rows && result.rows.length > 0) {
+            clearTimeout(timeout);
+            console.log('[DEBUG] Leader initialization complete (via onDataChange), follower proceeding');
+            resolve();
+          }
+        } catch (error) {
+          // Ignore errors during check
+        }
+      });
+    });
+
+    await initComplete;
+
+    // Enable foreign keys
+    try {
+      await db.execute('PRAGMA foreign_keys = ON');
+      console.log('[DEBUG] Foreign keys enabled successfully (follower)');
+    } catch (error) {
+      console.error('[ERROR] Failed to enable foreign keys:', error);
+      throw error;
+    }
+
+    console.log('[DEBUG] Non-leader writes remain enabled for BroadcastChannel sync');
+    return db;
+  }
+
+  // Leader tab: run migrations
+  console.log('[DEBUG] Leader tab proceeding with migrations...');
 
   // Allow all tabs to run migrations (schema operations)
   // Schema operations (CREATE TABLE) are identical across tabs, so it's safe
@@ -113,6 +226,16 @@ export async function initDb({ absurderSql, storageKey, migrations = [] }) {
     throw error;
   }
 
+  // Leader: Sync to IndexedDB to persist changes and notify followers via BroadcastChannel
+  console.log('[DEBUG] Leader syncing to IndexedDB to notify followers...');
+  try {
+    await db.sync();
+    console.log('[DEBUG] Leader sync complete - followers notified via BroadcastChannel');
+  } catch (error) {
+    console.error('[ERROR] Failed to sync database:', error);
+    throw error;
+  }
+
   // Keep non-leader writes enabled for multi-tab coordination
   // All tabs execute SQL locally, but ONLY the leader persists to IndexedDB via sync()
   // Follower tabs receive SQL via BroadcastChannel and execute it without syncing
@@ -125,186 +248,89 @@ export async function initDb({ absurderSql, storageKey, migrations = [] }) {
 /**
  * Convert JavaScript value to absurder-sql ColumnValue format.
  *
- * @param {any} value - JavaScript value to convert
- * @returns {Object} - ColumnValue object with { type, value? }
+ * absurder-sql uses a tagged union format for column values.
+ * Each value is an object with a "type" and optional "value" field.
+ *
+ * @param {*} value - JavaScript value to convert
+ * @returns {Object} - ColumnValue in absurder-sql format
  */
-function toColumnValue(value) {
+export function toColumnValue(value) {
   if (value === null || value === undefined) {
     return { type: 'Null' };
   }
+
   if (typeof value === 'number') {
-    if (Number.isInteger(value)) {
-      return { type: 'Integer', value };
-    }
-    return { type: 'Real', value };
+    return Number.isInteger(value)
+      ? { type: 'Integer', value }
+      : { type: 'Real', value };
   }
+
   if (typeof value === 'string') {
     return { type: 'Text', value };
   }
-  if (typeof value === 'bigint') {
-    return { type: 'BigInt', value: value.toString() };
-  }
-  if (value instanceof Uint8Array || Array.isArray(value)) {
-    return { type: 'Blob', value: Array.from(value) };
-  }
+
   if (value instanceof Date) {
     return { type: 'Date', value: value.getTime() };
   }
-  // Default to Text for other types
+
+  if (value instanceof Uint8Array || value instanceof ArrayBuffer) {
+    const uint8 = value instanceof Uint8Array ? value : new Uint8Array(value);
+    return { type: 'Blob', value: Array.from(uint8) };
+  }
+
+  // Fallback: convert to string
   return { type: 'Text', value: String(value) };
 }
 
 /**
- * Escape a parameter value for use in a SQL string.
+ * Execute a SQL query with proper parameter binding.
  *
- * @param {any} value - Value to escape
- * @returns {string} - Escaped SQL string
+ * This is a convenience wrapper around db.executeWithParams that handles
+ * parameter conversion to the absurder-sql ColumnValue format.
+ *
+ * @param {Object} db - Database handle from initDb()
+ * @param {string} sql - SQL query with ? placeholders
+ * @param {Array} params - Array of values to bind (auto-converted to ColumnValue format)
+ * @returns {Promise<Object>} - Query result
  */
-function escapeSqlValue(value) {
-  if (value === null || value === undefined) {
-    return 'NULL';
+export async function executeQuery(db, sql, params = []) {
+  if (!db || typeof db.executeWithParams !== 'function') {
+    throw new Error('Invalid database handle: must have executeWithParams method');
   }
-  if (typeof value === 'number') {
-    return String(value);
-  }
-  if (typeof value === 'string') {
-    // Escape single quotes by doubling them
-    return "'" + value.replace(/'/g, "''") + "'";
-  }
-  if (typeof value === 'boolean') {
-    return value ? '1' : '0';
-  }
-  if (value instanceof Date) {
-    return "'" + value.toISOString() + "'";
-  }
-  // Default: convert to string and escape
-  return "'" + String(value).replace(/'/g, "''") + "'";
+
+  const columnValues = params.map(toColumnValue);
+  return db.executeWithParams(sql, columnValues);
 }
 
 /**
- * Build a SQL string with escaped parameters.
+ * Convert absurder-sql QueryResult rows to plain JavaScript objects.
  *
- * @param {string} sql - SQL with ? placeholders
- * @param {any[]} params - Parameter values
- * @returns {string} - Complete SQL string
- */
-function buildSqlString(sql, params) {
-  let result = sql;
-  for (const param of params) {
-    result = result.replace('?', escapeSqlValue(param));
-  }
-  return result;
-}
-
-/**
- * Check if a SQL statement is a write operation.
+ * absurder-sql returns rows in a specialized format with typed column values.
+ * This function converts them to plain JS objects for easier consumption.
  *
- * @param {string} sql - SQL statement
- * @returns {boolean} - True if write operation
+ * @param {Object} result - QueryResult from absurder-sql
+ * @returns {Array<Object>} - Array of plain JS objects with column names as keys
  */
-function isWriteOperation(sql) {
-  const upperSql = sql.trim().toUpperCase();
-  return upperSql.startsWith('INSERT') ||
-         upperSql.startsWith('UPDATE') ||
-         upperSql.startsWith('DELETE') ||
-         upperSql.startsWith('CREATE') ||
-         upperSql.startsWith('DROP') ||
-         upperSql.startsWith('ALTER');
-}
-
-/**
- * Execute a query with optional parameters.
- * Automatically uses queueWrite() for non-leader write operations.
- *
- * @param {Database} db - Database instance
- * @param {string} sql - SQL query
- * @param {any[]} params - Optional query parameters
- * @returns {Promise<QueryResult>} - Query result with rows, columns, etc.
- */
-export async function executeQuery(db, sql, params) {
-  if (!db) {
-    throw new Error('Database instance provided to executeQuery is invalid');
+export function rowsToObjects(result) {
+  if (!result || !result.rows || !result.columns) {
+    return [];
   }
 
-  const hasParams = params && params.length > 0;
+  return result.rows.map(row => {
+    const obj = {};
+    for (let i = 0; i < result.columns.length; i++) {
+      const colName = result.columns[i];
+      const colValue = row.values[i];
 
-  // NOTE: Leader election check removed because we keep allowNonLeaderWrites(true)
-  // All tabs can execute writes directly, and we use BroadcastChannel to sync SQL
-  // across tabs for multi-tab coordination.
-
-  // Execute with or without params
-  if (hasParams) {
-    if (typeof db.executeWithParams !== 'function') {
-      throw new Error('Database instance does not support executeWithParams');
+      // Extract the actual value from the ColumnValue union
+      if (!colValue || colValue.type === 'Null') {
+        obj[colName] = null;
+      } else if ('value' in colValue) {
+        obj[colName] = colValue.value;
+      } else {
+        obj[colName] = null;
+      }
     }
-    // Convert JavaScript values to ColumnValue format
-    const columnValues = params.map(toColumnValue);
-
-    try {
-      return await db.executeWithParams(sql, columnValues);
-    } catch (error) {
-      console.error('[ERROR] Query failed:', error.message);
-      console.error('[ERROR] SQL:', sql.substring(0, 200));
-      throw error;
-    }
-  } else {
-    if (typeof db.execute !== 'function') {
-      throw new Error('Database instance does not support execute');
-    }
-
-    try {
-      return await db.execute(sql);
-    } catch (error) {
-      console.error('[ERROR] Query failed:', error.message);
-      console.error('[ERROR] SQL:', sql.substring(0, 200));
-      throw error;
-    }
-  }
-}
-
-/**
- * Export database to SQLite .db file format.
- *
- * @param {Database} db - Database instance
- * @returns {Promise<Uint8Array>} - Database file bytes
- */
-export async function exportToFile(db) {
-  if (!db || typeof db.exportToFile !== 'function') {
-    throw new Error('Database instance provided to exportToFile is invalid');
-  }
-  return db.exportToFile();
-}
-
-/**
- * Import SQLite database from .db file bytes.
- *
- * @param {Database} db - Database instance
- * @param {Uint8Array} payload - SQLite file bytes
- * @returns {Promise<void>}
- */
-export async function importFromFile(db, payload) {
-  console.log('[dbClient] importFromFile called with payload size:', payload?.length);
-
-  if (!db || typeof db.importFromFile !== 'function') {
-    throw new Error('Database instance provided to importFromFile is invalid');
-  }
-
-  console.log('[dbClient] Calling db.importFromFile...');
-  const result = await db.importFromFile(payload);
-  console.log('[dbClient] db.importFromFile completed, result:', result);
-
-  return result;
-}
-
-/**
- * Close database connection and clean up resources.
- *
- * @param {Database} db - Database instance
- * @returns {Promise<void>}
- */
-export async function closeDb(db) {
-  if (!db || typeof db.close !== 'function') {
-    throw new Error('Database instance provided to closeDb is invalid');
-  }
-  await db.close();
+    return obj;
+  });
 }
