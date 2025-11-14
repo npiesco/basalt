@@ -35,11 +35,11 @@ test.describe('INTEGRATION: Edit Note Through UI', () => {
     await page.click(`[data-testid="note-item"]:has-text("${originalTitle}")`);
 
     // Wait for edit mode to activate
-    await page.waitForSelector('[data-testid="edit-note-title-input"]', { timeout: 5000 });
+    await page.waitForSelector('[data-testid="edit-title-input"]', { timeout: 5000 });
 
     // Edit the title
     const newTitle = `Edited Note ${Date.now()}`;
-    await page.fill('[data-testid="edit-note-title-input"]', newTitle);
+    await page.fill('[data-testid="edit-title-input"]', newTitle);
 
     // Save the changes
     await page.click('[data-testid="save-note-button"]');
@@ -97,17 +97,19 @@ test.describe('INTEGRATION: Edit Note Through UI', () => {
 
     // Click to edit
     await page.click(`[data-testid="note-item"]:has-text("${noteTitle}")`);
-    await page.waitForSelector('[data-testid="edit-note-body-textarea"]', { timeout: 5000 });
-
-    // Edit the body
-    const noteBody = 'This is the edited content of the note.\n\nWith multiple paragraphs!';
-    await page.fill('[data-testid="edit-note-body-textarea"]', noteBody);
-
-    // Save
-    await page.click('[data-testid="save-note-button"]');
-
-    // Wait for save to complete (note list should refresh)
     await page.waitForTimeout(500);
+
+    // Edit the body using CodeMirror
+    const noteBody = 'This is the edited content of the note.\n\nWith multiple paragraphs!';
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(noteBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(1000); // Wait for loadNotes after autosave
 
     // Verify in database
     const noteData = await page.evaluate(async (title) => {
@@ -131,7 +133,8 @@ test.describe('INTEGRATION: Edit Note Through UI', () => {
     console.log('[E2E] ✓ Note body edited successfully');
   });
 
-  test('User can cancel editing without saving changes', async ({ page }) => {
+  test.skip('User can cancel editing without saving changes', async ({ page }) => {
+    // SKIPPED: With autosave, there's no manual save/cancel - changes autosave after 3s
     page.on('console', msg => console.log(`[Browser ${msg.type()}]`, msg.text()));
     page.on('pageerror', error => console.log('[Browser Error]', error.message));
 
@@ -146,10 +149,10 @@ test.describe('INTEGRATION: Edit Note Through UI', () => {
 
     // Click to edit
     await page.click(`[data-testid="note-item"]:has-text("${originalTitle}")`);
-    await page.waitForSelector('[data-testid="edit-note-title-input"]', { timeout: 5000 });
+    await page.waitForSelector('[data-testid="edit-title-input"]', { timeout: 5000 });
 
     // Change the title
-    await page.fill('[data-testid="edit-note-title-input"]', 'This should not be saved');
+    await page.fill('[data-testid="edit-title-input"]', 'This should not be saved');
 
     // Cancel instead of save
     await page.click('[data-testid="cancel-edit-button"]');
@@ -183,25 +186,34 @@ test.describe('INTEGRATION: Edit Note Through UI', () => {
 
     // Edit 1: Change title
     await page.click(`[data-testid="note-item"]:has-text("${currentTitle}")`);
-    await page.waitForSelector('[data-testid="edit-note-title-input"]');
+    await page.waitForSelector('[data-testid="edit-title-input"]');
     currentTitle = `Multi Edit v2 ${Date.now()}`;
-    await page.fill('[data-testid="edit-note-title-input"]', currentTitle);
+    await page.fill('[data-testid="edit-title-input"]', currentTitle);
     await page.click('[data-testid="save-note-button"]');
     await page.waitForSelector(`[data-testid="note-item"]:has-text("${currentTitle}")`);
 
-    // Edit 2: Add body
+    // Edit 2: Add body using CodeMirror
     await page.click(`[data-testid="note-item"]:has-text("${currentTitle}")`);
-    await page.waitForSelector('[data-testid="edit-note-body-textarea"]');
-    await page.fill('[data-testid="edit-note-body-textarea"]', 'First body content');
-    await page.click('[data-testid="save-note-button"]');
     await page.waitForTimeout(500);
+    await page.waitForSelector('.cm-content');
+    let cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type('First body content');
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(1000);
 
-    // Edit 3: Update body again
+    // Edit 3: Update body again using CodeMirror
     await page.click(`[data-testid="note-item"]:has-text("${currentTitle}")`);
-    await page.waitForSelector('[data-testid="edit-note-body-textarea"]');
-    await page.fill('[data-testid="edit-note-body-textarea"]', 'Second body content - final');
-    await page.click('[data-testid="save-note-button"]');
     await page.waitForTimeout(500);
+    await page.waitForSelector('.cm-content');
+    cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.press('Control+A'); // Select all existing content
+    await page.keyboard.type('Second body content - final');
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 5000 });
+    await page.waitForTimeout(1000);
 
     // Verify final state in database
     const finalNote = await page.evaluate(async (title) => {
