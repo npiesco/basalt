@@ -182,10 +182,10 @@ test.describe('INTEGRATION: Delete Note Through UI', () => {
 
     // Start editing the note
     await page.click(`[data-testid="note-item"]:has-text("${noteTitle}")`);
-    await page.waitForSelector('[data-testid="edit-note-title-input"]');
+    await page.waitForSelector('[data-testid="edit-title-input"]');
 
     // Edit mode should be visible
-    const editForm = page.locator('[data-testid="edit-note-title-input"]');
+    const editForm = page.locator('[data-testid="edit-title-input"]');
     await expect(editForm).toBeVisible();
 
     // Now delete the note (there should be a delete button in edit mode too)
@@ -194,7 +194,7 @@ test.describe('INTEGRATION: Delete Note Through UI', () => {
     await page.click('[data-testid="confirm-delete-button"]');
 
     // Wait for edit mode to close
-    await page.waitForSelector('[data-testid="edit-note-title-input"]', {
+    await page.waitForSelector('[data-testid="edit-title-input"]', {
       state: 'detached',
       timeout: 5000
     });
