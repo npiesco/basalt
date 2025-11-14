@@ -1390,12 +1390,40 @@ export default function HomePage(): JSX.Element {
         await executeQuery(db, 'INSERT INTO note_tags (note_id, tag_id) VALUES (?, ?)', [noteIdToSave, tagId]);
       }
 
-      // ✅ CORRECT PATTERN: Just sync, keep database open
+      // ✅ CORRECT PATTERN: Sync + update backup for persistence across reloads
       // DON'T close/reopen - causes IndexedDB corruption race condition
       try {
         console.log('[AUTOSAVE] Syncing to IndexedDB...');
         await db.sync();
         console.log('[AUTOSAVE] ✓ Sync complete - database stays open');
+
+        // CRITICAL: Also update the backup so data persists across page reloads
+        // Since each reload creates a new timestamped database, we MUST update the backup
+        console.log('[AUTOSAVE] Updating backup for page reload persistence...');
+        await db.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+        const exportData = await db.exportToFile();
+
+        const backupDbName = 'basalt-vault-backup';
+        await new Promise<void>((resolve, reject) => {
+          const request = indexedDB.open(backupDbName);
+          request.onsuccess = (event: any) => {
+            const backupDb = event.target.result;
+            const transaction = backupDb.transaction(['exports'], 'readwrite');
+            const store = transaction.objectStore('exports');
+            store.put(exportData, 'latest');
+
+            transaction.oncomplete = () => {
+              backupDb.close();
+              console.log('[AUTOSAVE] ✓ Backup updated');
+              resolve();
+            };
+            transaction.onerror = () => {
+              backupDb.close();
+              reject(new Error('Failed to update backup'));
+            };
+          };
+          request.onerror = () => reject(new Error('Failed to open backup DB'));
+        });
       } catch (syncErr: any) {
         console.error('[AUTOSAVE] ERROR syncing to IndexedDB:', syncErr);
         throw syncErr;

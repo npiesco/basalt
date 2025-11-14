@@ -61,17 +61,19 @@ test('Debug wikilink parsing with full console logs', async ({ page }) => {
 
   console.log('[E2E] ✓ Clicked note-2 to edit');
 
-  // Fill body with wikilinks
-  await page.locator('[data-testid="note-body-textarea"]').fill(note2Body);
-  console.log('[E2E] ✓ Filled body with wikilink:', note2Body);
+  // Use CodeMirror editor to add wikilinks
+  await page.waitForSelector('.cm-content');
+  const cmContent = page.locator('.cm-content');
+  await cmContent.click();
+  await page.keyboard.type(note2Body);
+  console.log('[E2E] ✓ Typed body with wikilink:', note2Body);
 
-  // Click save button
-  console.log('[E2E] Clicking save button...');
-  await page.locator('[data-testid="save-note-button"]').click();
-
-  // Wait for save to complete
-  await page.waitForTimeout(3000);
-  console.log('[E2E] ✓ Save completed, waited 3s');
+  // Wait for autosave
+  console.log('[E2E] Waiting for autosave...');
+  await page.waitForTimeout(3500);
+  await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+  await page.waitForTimeout(1000);
+  console.log('[E2E] ✓ Autosave completed');
 
   // Query backlinks from database
   const backlinks = await page.evaluate(async (targetId) => {

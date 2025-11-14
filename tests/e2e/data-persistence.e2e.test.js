@@ -48,23 +48,20 @@ test.describe('INTEGRATION: Data Persistence Through Page Reloads', () => {
     await page.click('[data-testid="new-note-button"]');
     await page.waitForSelector(`[data-testid="note-item"]:has-text("${note2Title}")`);
 
-    // Directly update the note body in the database (bypassing autosave bug)
-    // This test is focused on persistence, not the autosave mechanism
-    await page.evaluate(async ({ title, body }) => {
-      await window.basaltDb.executeQuery(
-        'UPDATE notes SET body = ? WHERE title = ?',
-        [body, title]
-      );
-    }, { title: note2Title, body: noteBody });
+    // Edit the note using CodeMirror + autosave
+    await page.click(`[data-testid="note-item"]:has-text("${note2Title}")`);
+    await page.waitForTimeout(500);
+    await page.waitForSelector('.cm-content');
 
-    // Trigger a manual sync by accessing the database wrapper's sync method
-    await page.evaluate(async () => {
-      if (window.db && window.db.sync) {
-        await window.db.sync();
-      }
-    });
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.waitForTimeout(200);
+    await page.keyboard.type(noteBody);
 
-    await page.waitForTimeout(1000); // Wait for sync to complete
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+    await page.waitForTimeout(1000);
 
     console.log('[E2E] Data created. Waiting for IndexedDB sync...');
 
@@ -77,7 +74,12 @@ test.describe('INTEGRATION: Data Persistence Through Page Reloads', () => {
         'SELECT body FROM notes WHERE title = ?',
         [title]
       );
-      return result.length > 0 ? result[0].body : null;
+      // executeQuery returns {rows: [...], columns: [...]}
+      if (result.rows && result.rows.length > 0) {
+        const bodyValue = result.rows[0].values[0];
+        return bodyValue.type === 'Null' ? null : bodyValue.value;
+      }
+      return null;
     }, note2Title);
     console.log('[E2E] Body in DB BEFORE reload:', bodyBeforeReload);
 
@@ -108,7 +110,11 @@ test.describe('INTEGRATION: Data Persistence Through Page Reloads', () => {
         'SELECT body FROM notes WHERE title = ?',
         [title]
       );
-      return result.length > 0 ? result[0].body : null;
+      if (result.rows && result.rows.length > 0) {
+        const bodyValue = result.rows[0].values[0];
+        return bodyValue.type === 'Null' ? null : bodyValue.value;
+      }
+      return null;
     }, note2Title);
 
     console.log('[E2E] Note body after reload:', note2BodyFromDb);
@@ -204,23 +210,34 @@ test.describe('INTEGRATION: Data Persistence Through Page Reloads', () => {
     await page.click('[data-testid="new-note-button"]');
     await page.waitForSelector(`[data-testid="note-item"]:has-text("${noteTitle}")`);
 
-    // Directly update the note body in database (bypassing autosave bug)
-    // Update with edited body (skip original body since we're testing final persistence)
-    await page.evaluate(async ({ title, body }) => {
-      await window.basaltDb.executeQuery(
-        'UPDATE notes SET body = ? WHERE title = ?',
-        [body, title]
-      );
-    }, { title: noteTitle, body: editedBody });
+    // Edit note using CodeMirror - add initial body
+    await page.click(`[data-testid="note-item"]:has-text("${noteTitle}")`);
+    await page.waitForTimeout(500);
+    await page.waitForSelector('.cm-content');
 
-    // Trigger manual sync
-    await page.evaluate(async () => {
-      if (window.db && window.db.sync) {
-        await window.db.sync();
-      }
-    });
+    let cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type(originalBody);
 
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
     await page.waitForTimeout(1000);
+
+    // Edit again - replace with edited body
+    await page.click(`[data-testid="note-item"]:has-text("${noteTitle}")`);
+    await page.waitForTimeout(500);
+    await page.waitForSelector('.cm-content');
+
+    cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.press('Control+A');
+    await page.keyboard.type(editedBody);
+
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+    await page.waitForTimeout(2000);
 
     console.log('[E2E] Reloading...');
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -232,7 +249,11 @@ test.describe('INTEGRATION: Data Persistence Through Page Reloads', () => {
         'SELECT body FROM notes WHERE title = ?',
         [title]
       );
-      return result.length > 0 ? result[0].body : null;
+      if (result.rows && result.rows.length > 0) {
+        const bodyValue = result.rows[0].values[0];
+        return bodyValue.type === 'Null' ? null : bodyValue.value;
+      }
+      return null;
     }, noteTitle);
 
     console.log('[E2E] ✓ Edited content persisted:', bodyAfterReload);

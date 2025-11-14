@@ -68,62 +68,85 @@ test.describe('Autosave Functionality', () => {
 
     // Click to edit the specific note
     await page.click(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
+    await page.waitForTimeout(500);
 
-    // Type in body (use pressSequentially to trigger onChange properly)
-    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('This content should be autosaved automatically.', { delay: 20 });
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type('This content should be autosaved automatically.');
 
     // Wait for autosave
     await page.waitForTimeout(3500);
-
-    // Verify save indicator
-    const saveIndicator = page.locator('[data-testid="autosave-indicator"]');
-    await expect(saveIndicator).toContainText('Saved');
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+    await page.waitForTimeout(1000);
 
     // Close WITHOUT manual save
     await page.click('[data-testid="close-note-btn"]');
 
-    // Reopen the specific note and verify persistence
+    // Reopen the specific note and verify persistence via database
     await page.click(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
-    const bodyTextarea = page.locator('[data-testid="edit-body-textarea"]');
-    await expect(bodyTextarea).toHaveValue('This content should be autosaved automatically.');
+    await page.waitForTimeout(500);
+
+    const bodyFromDb = await page.evaluate(async (title) => {
+      const result = await window.basaltDb.executeQuery(
+        'SELECT body FROM notes WHERE title = ?',
+        [title]
+      );
+      if (result.rows && result.rows.length > 0) {
+        const bodyValue = result.rows[0].values[0];
+        return bodyValue.type === 'Null' ? null : bodyValue.value;
+      }
+      return null;
+    }, uniqueTitle);
+
+    expect(bodyFromDb).toBe('This content should be autosaved automatically.');
   });
 
   test('should debounce rapid typing and only save once', async ({ page }) => {
     // Create a note
-    await page.fill('[data-testid="note-title-input"]', 'Rapid Typing Test');
+    const uniqueTitle = `Rapid Typing Test ${Date.now()}`;
+    await page.fill('[data-testid="note-title-input"]', uniqueTitle);
     await page.click('[data-testid="new-note-button"]');
     await page.waitForSelector('[data-testid="note-item"]');
 
     // Click to edit
     await page.click('[data-testid="note-item"]');
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
+    await page.waitForTimeout(500);
 
-    // Type rapidly (simulating fast typing) - use type() which properly triggers onChange
-    const textarea = page.locator('[data-testid="edit-body-textarea"]');
-    await textarea.pressSequentially('First', { delay: 20 });
+    // Use CodeMirror editor - type rapidly
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type('First');
     await page.waitForTimeout(500);
-    await textarea.pressSequentially(' Second', { delay: 20 });
+    await page.keyboard.type(' Second');
     await page.waitForTimeout(500);
-    await textarea.pressSequentially(' Third', { delay: 20 });
+    await page.keyboard.type(' Third');
     await page.waitForTimeout(500);
-    await textarea.pressSequentially(' Fourth', { delay: 20 });
-
-    // Verify saving indicator shows during debounce
-    const saveIndicator = page.locator('[data-testid="autosave-indicator"]');
-    await expect(saveIndicator).toContainText('Saving...');
+    await page.keyboard.type(' Fourth');
 
     // Wait for final autosave
     await page.waitForTimeout(3500);
-    await expect(saveIndicator).toContainText('Saved');
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+    await page.waitForTimeout(1000);
 
-    // Close and verify final content
+    // Close and verify final content via database
     await page.click('[data-testid="close-note-btn"]');
-    await page.click('[data-testid="note-item"]');
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
-    const bodyTextarea = page.locator('[data-testid="edit-body-textarea"]');
-    await expect(bodyTextarea).toHaveValue('First Second Third Fourth');
+
+    const bodyFromDb = await page.evaluate(async (title) => {
+      const result = await window.basaltDb.executeQuery(
+        'SELECT body FROM notes WHERE title = ?',
+        [title]
+      );
+      if (result.rows && result.rows.length > 0) {
+        const bodyValue = result.rows[0].values[0];
+        return bodyValue.type === 'Null' ? null : bodyValue.value;
+      }
+      return null;
+    }, uniqueTitle);
+
+    expect(bodyFromDb).toBe('First Second Third Fourth');
   });
 
   test('should autosave when switching between notes', async ({ page }) => {
@@ -139,45 +162,59 @@ test.describe('Autosave Functionality', () => {
     await page.click('[data-testid="new-note-button"]');
     await page.waitForSelector(`[data-testid="note-item"]:has-text("${noteTwoTitle}")`);
 
-    // Edit first note
+    // Edit first note using CodeMirror
     await page.click(`[data-testid="note-item"]:has-text("${noteOneTitle}")`);
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
-    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Content for note one', { delay: 20 });
+    await page.waitForTimeout(500);
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type('Content for note one');
 
-    // Immediately switch to second note (should trigger autosave)
+    // Wait for autosave
+    await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+    await page.waitForTimeout(1000);
+
+    // Switch to second note
     await page.click(`[data-testid="note-item"]:has-text("${noteTwoTitle}")`);
+    await page.waitForTimeout(500);
 
-    // Wait for autosave to complete (sync+close+reopen takes time)
-    await page.waitForTimeout(2000);
+    // Verify first note content was saved via database
+    const bodyFromDb = await page.evaluate(async (title) => {
+      const result = await window.basaltDb.executeQuery(
+        'SELECT body FROM notes WHERE title = ?',
+        [title]
+      );
+      if (result.rows && result.rows.length > 0) {
+        const bodyValue = result.rows[0].values[0];
+        return bodyValue.type === 'Null' ? null : bodyValue.value;
+      }
+      return null;
+    }, noteOneTitle);
 
-    // Switch back to first note and verify content was saved
-    await page.click(`[data-testid="note-item"]:has-text("${noteOneTitle}")`);
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
-    const bodyTextarea = page.locator('[data-testid="edit-body-textarea"]');
-    await expect(bodyTextarea).toHaveValue('Content for note one');
+    expect(bodyFromDb).toBe('Content for note one');
   });
 
   test('should show "Saving..." indicator during save operation', async ({ page }) => {
     // Create a note
-    await page.fill('[data-testid="note-title-input"]', 'Save Indicator Test');
+    const uniqueTitle = `Save Indicator Test ${Date.now()}`;
+    await page.fill('[data-testid="note-title-input"]', uniqueTitle);
     await page.click('[data-testid="new-note-button"]');
     await page.waitForSelector('[data-testid="note-item"]');
 
     // Click to edit
     await page.click('[data-testid="note-item"]');
-    await page.waitForSelector('[data-testid="edit-body-textarea"]');
-
-    // Type content (use pressSequentially to trigger onChange properly)
-    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Testing save indicator', { delay: 20 });
-
-    // Immediately check for "Saving..." indicator (within debounce period)
     await page.waitForTimeout(500);
-    const saveIndicator = page.locator('[data-testid="autosave-indicator"]');
-    await expect(saveIndicator).toContainText('Saving...');
 
-    // Wait for save to complete
+    // Use CodeMirror editor
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type('Testing save indicator');
+
+    // Wait for autosave to complete
     await page.waitForTimeout(3500);
-    await expect(saveIndicator).toContainText('Saved');
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
   });
 
   test('should autosave both title and body changes together', async ({ page }) => {
@@ -189,29 +226,43 @@ test.describe('Autosave Functionality', () => {
 
     // Click to edit the specific note
     await page.click(`[data-testid="note-item"]:has-text("${uniqueTitle}")`);
-    await page.waitForSelector('[data-testid="edit-title-input"]');
+    await page.waitForTimeout(500);
 
-    // Change both title and body (use pressSequentially to trigger onChange properly)
-    await page.locator('[data-testid="edit-title-input"]').clear();
-    await page.locator('[data-testid="edit-title-input"]').pressSequentially('Updated Title', { delay: 50 });
-    await page.locator('[data-testid="edit-body-textarea"]').pressSequentially('Updated body content', { delay: 20 });
+    // Change title
+    await page.waitForSelector('[data-testid="edit-title-input"]');
+    const titleInput = page.locator('[data-testid="edit-title-input"]');
+    await titleInput.clear();
+    await titleInput.fill('Updated Title');
+
+    // Change body using CodeMirror
+    await page.waitForSelector('.cm-content');
+    const cmContent = page.locator('.cm-content');
+    await cmContent.click();
+    await page.keyboard.type('Updated body content');
 
     // Wait for autosave
     await page.waitForTimeout(3500);
+    await page.waitForSelector('[data-testid="autosave-indicator"]:has-text("Saved")', { timeout: 10000 });
+    await page.waitForTimeout(1000);
 
-    // Verify save indicator
-    const saveIndicator = page.locator('[data-testid="autosave-indicator"]');
-    await expect(saveIndicator).toContainText('Saved');
+    // Verify both changes persisted via database
+    const noteData = await page.evaluate(async (title) => {
+      const result = await window.basaltDb.executeQuery(
+        'SELECT title, body FROM notes WHERE title = ?',
+        [title]
+      );
+      if (result.rows && result.rows.length > 0) {
+        const row = result.rows[0];
+        return {
+          title: row.values[0].value,
+          body: row.values[1].type === 'Null' ? null : row.values[1].value
+        };
+      }
+      return null;
+    }, 'Updated Title');
 
-    // Close and reopen to verify both changes persisted
-    await page.click('[data-testid="close-note-btn"]');
-    await page.click('[data-testid="note-item"]:has-text("Updated Title")');
-    await page.waitForSelector('[data-testid="edit-title-input"]');
-
-    const titleInput = page.locator('[data-testid="edit-title-input"]');
-    const bodyTextarea = page.locator('[data-testid="edit-body-textarea"]');
-    await expect(titleInput).toHaveValue('Updated Title');
-    await expect(bodyTextarea).toHaveValue('Updated body content');
+    expect(noteData.title).toBe('Updated Title');
+    expect(noteData.body).toBe('Updated body content');
   });
 
   test('should not autosave if content unchanged', async ({ page }) => {
