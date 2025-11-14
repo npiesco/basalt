@@ -15,7 +15,7 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/theme-one-dark": "^6.1.3",
     "@codemirror/view": "^6.38.6",
-    "@npiesco/absurder-sql": "^0.1.16",
+    "@npiesco/absurder-sql": "^0.1.17",
     "cytoscape": "^3.33.1",
     "marked": "^17.0.0",
     "next": "^16.0.1",
